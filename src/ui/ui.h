@@ -11,6 +11,8 @@
 
 #include <gctypes.h>
 
+#include "../core/pd_types.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
