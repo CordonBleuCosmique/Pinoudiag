@@ -39,20 +39,43 @@ fonctionnalités réseau/thème/banner comme HBC), sauf si le module
 `dol_loader` adapté de HBC entraîne une dépendance transitoire à auditer
 précisément au moment de l'intégration du code.
 
+## Tentative d'installation du toolchain dans ce sandbox — [VERIFIED, échec documenté]
+
+Sept canaux de distribution testés directement depuis cette session, tous
+bloqués par la politique réseau du sandbox (proxy à liste blanche stricte,
+confirmé via `/__agentproxy/status` : seuls npm, jsr.io, PyPI, crates.io et
+le proxy Go modules sont en accès direct hors proxy ; tout le reste passe
+par un proxy qui n'autorise qu'un sous-ensemble restreint de domaines) :
+
+| Canal tenté | Résultat |
+|---|---|
+| `devkitpro.org` (procédure pacman officielle) | `403` — bloqué |
+| `pacman.devkitpro.org` (dépôt pacman direct) | `403` — bloqué |
+| `sourceforge.net` (portlibs, cité par le README de HBC) | `403` — bloqué |
+| Image Docker officielle `devkitpro/devkitppc` (Docker Hub) | Manifest accessible via `registry-1.docker.io`, mais les **blobs** (656 Mo) sont servis par `production.cloudfront.docker.com`, bloqué (`403`) — daemon Docker démarré avec succès dans ce sandbox (`dockerd` root, cgroup v1), mais le pull échoue à la couche CDN |
+| `ghcr.io/devkitpro/devkitppc` | `401 denied` — image absente à ce chemin sur ce registre |
+| `quay.io` | `403` — bloqué |
+| GNU FTP/mirrors pour reconstruire un cross-toolchain PowerPC-eabi/newlib depuis les sources (gcc, binutils, newlib) | `ftp.gnu.org`, `gcc.gnu.org`, `sourceware.org`, `ftpmirror.gnu.org`, `mirrors.kernel.org` — tous `403` |
+
+**Conclusion : l'acquisition du toolchain devkitPPC est infaisable dans ce
+sandbox avec la politique réseau actuelle**, quelle que soit la méthode
+(installeur officiel, image Docker pré-construite, ou reconstruction depuis
+les sources). Ce n'est pas un problème de méthode mais de politique réseau
+organisationnelle (liste blanche stricte côté proxy).
+
 ## Recommandation
 
-Deux options pour la suite :
-
 1. **L'utilisateur fournit un environnement avec devkitPPC** (poste local ou
-   CI GitHub Actions avec une image devkitPro) pour la compilation et les
-   tests — cette session produit le code source, la structure SD/USB, les
-   scripts de build, mais ne peut pas prouver qu'ils compilent.
-2. **Tenter une installation manuelle du toolchain** dans ce sandbox par
-   d'autres voies que `devkitpro.org` (ex. si un miroir GitHub Releases des
-   binaires devkitPPC est accessible via `github.com`, qui lui fonctionne
-   ici) — à explorer si souhaité, mais pas garanti de fonctionner selon la
-   politique réseau du sandbox.
+   CI GitHub Actions avec l'image `devkitpro/devkitppc`, qui elle a accès
+   sans restriction à Docker Hub) pour la compilation et les tests — cette
+   session continue à produire le code source, la structure SD/USB et les
+   scripts de build, marqués **[UNVERIFIED — non compilé]** jusqu'à
+   validation dans un tel environnement.
+2. Si l'accès sandbox est indispensable, la seule voie possible serait que
+   l'administrateur de l'organisation ajoute `devkitpro.org` (ou
+   `production.cloudfront.docker.com` pour Docker Hub) à la liste blanche du
+   proxy réseau — hors de portée de cette session.
 
-Aucune de ces deux options n'a été tranchée à ce stade — c'est un point à
-discuter avant de lancer l'implémentation (POC 1 et suivants), en plus de la
-question d'architecture posée dans `return_to_loader.md`.
+Décision : on continue l'implémentation (POC 1 et suivants) sans compilation
+possible dans ce sandbox ; tout le code sera explicitement marqué
+[UNVERIFIED — non compilé] jusqu'à build/test côté utilisateur.
