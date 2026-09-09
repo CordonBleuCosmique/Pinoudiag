@@ -4,16 +4,33 @@
  *
  * Fichier unique de memoire d'execution : USB:/PinouDiag.session
  *
- * Regles :
- *  - Au demarrage, un fichier existant est traite comme une session
- *    interrompue : on le journalise puis on le supprime avant d'en
- *    creer un nouveau (jamais silencieusement ignore).
+ * Regles (section 6 du brief, avec une precision necessaire - voir
+ * paragraphe suivant) :
  *  - Sauvegarde a chaque mutation (etape, resultat, erreur) pour
  *    permettre une reprise fidele en cas de coupure.
  *  - Ne jamais supprimer le fichier de session avant que report.json/
  *    report.txt/wiimedic.txt soient confirmes ecrits (pd_session_end
  *    est le seul point qui supprime, et c'est a l'appelant de garantir
  *    l'ordre - voir core/shutdown).
+ *
+ * Precision par rapport au texte litteral du brief ("un fichier existant
+ * est une session interrompue, on le supprime toujours") : ce
+ * comportement est INCOMPATIBLE avec l'Option A retenue dans
+ * docs/return_to_loader.md, qui redemarre completement PinouDiag apres
+ * chaque addon (chainload aller simple, pas de call/return possible sur
+ * Wii - voir ce document). Sans reconnaitre ce cas, PinouDiag effacerait
+ * sa propre session juste avant de reprendre apres WiiMedic et
+ * relancerait tout depuis le debut a l'infini.
+ *
+ * Regle appliquee ici (validee implicitement par l'utilisateur en
+ * choisissant l'Option A, qui decrit explicitement ce mecanisme) :
+ *   - state == RUNNING  -> reprise (le fichier est charge tel quel, pas
+ *     supprime). Les etapes internes etant idempotentes, reprendre une
+ *     session RUNNING est sans risque meme apres une vraie coupure de
+ *     courant (pas seulement apres un chainload volontaire).
+ *   - state == DONE / ERROR / fichier illisible -> traite comme
+ *     interrompu au sens du brief : journalise, supprime, nouvelle
+ *     session creee.
  */
 #ifndef PD_SESSION_H
 #define PD_SESSION_H
@@ -49,9 +66,11 @@ typedef struct {
     bool                had_interrupted_session;       /* info pour le rapport/logs */
 } pd_session_t;
 
-/* Detecte une session precedente interrompue (et la supprime), puis en
- * cree une nouvelle. 'console_fingerprint' peut etre NULL si pas encore
- * connu a cet instant (rempli plus tard via pd_session_set_console). */
+/* Reprend une session RUNNING existante, ou en cree une nouvelle si
+ * aucune / DONE / ERROR / illisible (voir note en tete de fichier).
+ * 'console_fingerprint' peut etre NULL si pas encore connu a cet instant
+ * (rempli plus tard via pd_session_set_console) - ignore si une session
+ * est reprise (le fingerprint deja enregistre est conserve). */
 pd_error_t pd_session_start(pd_session_t *session, const char *console_fingerprint);
 
 void pd_session_set_step(pd_session_t *session, const char *step, int progress_percent);

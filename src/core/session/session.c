@@ -25,24 +25,105 @@ static void generate_session_id(char *out) {
              (unsigned int)(t >> 32), (unsigned int)(t & 0xFFFFFFFF));
 }
 
-static bool file_exists(const char *path) {
-    FILE *f = fopen(path, "r");
-    if (!f) return false;
-    fclose(f);
+/* Recharge le fichier de session tel qu'ecrit par pd_session_save().
+ * Renvoie false si le fichier est absent, illisible, ou visiblement
+ * corrompu (premiere ligne inattendue). */
+static bool session_load(pd_session_t *session) {
+    FILE *fp;
+    char line[300];
+
+    fp = fopen(PD_SESSION_PATH, "r");
+    if (!fp)
+        return false;
+
+    memset(session, 0, sizeof(*session));
+    pd_result_list_init(&session->results);
+
+    if (!fgets(line, sizeof(line), fp) || strncmp(line, "PINOUDIAG_SESSION", 17) != 0) {
+        fclose(fp);
+        return false;
+    }
+
+    while (fgets(line, sizeof(line), fp)) {
+        size_t len = strlen(line);
+        char *eq;
+
+        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
+            line[--len] = '\0';
+
+        if (strncmp(line, "result:", 7) == 0) {
+            /* format : result:<test>|<status>|<source>|<detail> */
+            char *test, *status_str, *source, *detail;
+            char *p = line + 7;
+
+            test = p;
+            p = strchr(p, '|'); if (!p) continue; *p++ = '\0';
+            status_str = p;
+            p = strchr(p, '|'); if (!p) continue; *p++ = '\0';
+            source = p;
+            p = strchr(p, '|'); if (!p) continue; *p++ = '\0';
+            detail = p;
+
+            {
+                pd_status_t st = PD_STATUS_NOT_TESTED;
+                if      (strcmp(status_str, "PASS") == 0)       st = PD_STATUS_PASS;
+                else if (strcmp(status_str, "WARN") == 0)       st = PD_STATUS_WARN;
+                else if (strcmp(status_str, "FAIL") == 0)       st = PD_STATUS_FAIL;
+                else if (strcmp(status_str, "ERROR") == 0)      st = PD_STATUS_ERROR;
+                pd_result_list_add(&session->results, test, st, source, detail);
+            }
+            continue;
+        }
+
+        eq = strchr(line, '=');
+        if (!eq) continue;
+        *eq = '\0';
+
+        if (strcmp(line, "session_id") == 0)
+            strncpy(session->session_id, eq + 1, PD_SESSION_ID_LEN - 1);
+        else if (strcmp(line, "state") == 0) {
+            if (strcmp(eq + 1, "DONE") == 0) session->state = PD_SESSION_DONE;
+            else if (strcmp(eq + 1, "ERROR") == 0) session->state = PD_SESSION_ERROR;
+            else session->state = PD_SESSION_RUNNING;
+        } else if (strcmp(line, "step") == 0)
+            strncpy(session->step, eq + 1, PD_STEP_ID_MAX - 1);
+        else if (strcmp(line, "console") == 0)
+            strncpy(session->console, eq + 1, PD_CONSOLE_ID_MAX - 1);
+        else if (strcmp(line, "progress") == 0)
+            session->progress_percent = atoi(eq + 1);
+        else if (strcmp(line, "addons_run") == 0)
+            strncpy(session->addons_run, eq + 1, sizeof(session->addons_run) - 1);
+        /* last_error n'est pas reparse (chaine libre, pas critique pour
+         * la reprise - re-derive via l'execution normale du workflow) */
+    }
+
+    fclose(fp);
     return true;
 }
 
 pd_error_t pd_session_start(pd_session_t *session, const char *console_fingerprint) {
+    if (session_load(session)) {
+        if (session->state == PD_SESSION_RUNNING) {
+            /* Reprise legitime - voir note en tete de session.h sur la
+             * necessite de cette exception par rapport au texte litteral
+             * du brief, requise par l'Option A (docs/return_to_loader.md). */
+            return PD_OK;
+        }
+        /* DONE/ERROR : traite comme interrompu ci-dessous. */
+    }
+
     memset(session, 0, sizeof(*session));
     pd_result_list_init(&session->results);
 
-    if (file_exists(PD_SESSION_PATH)) {
-        /* Session precedente interrompue (section 6 du brief) : on ne
-         * l'ignore jamais silencieusement, on le journalise via le flag
-         * pour que le rapport final puisse le mentionner, puis on
-         * supprime avant de continuer. */
-        session->had_interrupted_session = true;
-        remove(PD_SESSION_PATH);
+    /* Fichier absent, illisible, ou DONE/ERROR resultant : journalise
+     * comme interrompu (section 6 du brief) avant d'en creer un nouveau. */
+    {
+        FILE *f = fopen(PD_SESSION_PATH, "r");
+        if (f) {
+            fclose(f);
+            session->had_interrupted_session = true;
+            remove(PD_SESSION_PATH);
+        }
     }
 
     generate_session_id(session->session_id);

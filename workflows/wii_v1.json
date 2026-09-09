@@ -1,0 +1,11 @@
+{
+  "id": "wii_v1",
+  "name": "PinouDiag Wii V1",
+  "steps": [
+    { "id": "identify", "type": "internal" },
+    { "id": "storage", "type": "internal" },
+    { "id": "wiimedic", "type": "addon", "addon": "wiimedic" },
+    { "id": "analysis", "type": "internal" },
+    { "id": "report", "type": "internal" }
+  ]
+}

@@ -102,14 +102,22 @@ clean:
 	@echo clean ...
 	@rm -rf "$(BUILD)" "$(TARGET).elf" "$(TARGET).dol" "$(TARGET).map"
 
-# Prepare une image de carte SD prete a l'emploi : SD:/boot.elf a la racine
-# (point d'entree LetterBomb, voir docs/letterbomb.md) + config/workflows.
+# Prepare une image de carte SD prete a l'emploi (structure section 5 du
+# brief) : boot.dol a la racine (point d'entree LetterBomb exact, voir
+# docs/letterbomb.md et docs/return_to_loader.md), PinouDiag/{workflows,
+# addons,config} en sous-dossier. Les addons doivent avoir ete construits
+# au prealable (voir docs/build.md, etape 3 : third_party/WiiMedic-PinouDiag).
 sd-image: all
 	@rm -rf "$(DIST_DIR)/sd"
-	@mkdir -p "$(DIST_DIR)/sd"
+	@mkdir -p "$(DIST_DIR)/sd/PinouDiag"
 	@cp -v "$(TARGET).dol" "$(DIST_DIR)/sd/boot.dol"
-	@cp -rv workflows "$(DIST_DIR)/sd/PinouDiag_workflows" 2>/dev/null || true
+	@cp -rv workflows "$(DIST_DIR)/sd/PinouDiag/workflows"
+	@cp -rv addons "$(DIST_DIR)/sd/PinouDiag/addons"
+	@if [ -d config ] && [ -n "$$(ls -A config 2>/dev/null)" ]; then cp -rv config "$(DIST_DIR)/sd/PinouDiag/config"; fi
 	@echo "Image SD prete dans $(DIST_DIR)/sd (a copier a la racine de la carte)"
+	@if [ ! -f "$(DIST_DIR)/sd/PinouDiag/addons/WiiMedic/boot.dol" ]; then \
+		echo "ATTENTION: addons/WiiMedic/boot.dol absent - construire d'abord third_party/WiiMedic-PinouDiag (make install)"; \
+	fi
 
 dist: sd-image
 	@cd "$(DIST_DIR)" && zip -r "$(CURDIR)/PinouDiag_v$(VERSION).zip" sd

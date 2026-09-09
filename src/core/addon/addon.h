@@ -10,6 +10,8 @@
 #ifndef PD_ADDON_H
 #define PD_ADDON_H
 
+#include <stddef.h>
+
 #include "../pd_types.h"
 
 #ifdef __cplusplus
@@ -30,9 +32,19 @@ typedef struct {
     char output[PD_ADDON_PATH_MAX];       /* nom de fichier de sortie attendu, ex: "WiiMedic_Report.txt" */
 } pd_addon_t;
 
-/* Lit et parse addons/<id>/manifest.json. addon_dir est le chemin complet
+/* Lit et parse <addon_dir>/manifest.json. addon_dir est le chemin complet
  * du dossier de l'addon (ex: "sd:/PinouDiag/addons/WiiMedic"). */
 pd_error_t pd_addon_load_manifest(const char *addon_dir, pd_addon_t *addon);
+
+/* Parcourt addons_root (ex: "sd:/PinouDiag/addons") et renvoie dans
+ * out_dir le chemin du premier sous-dossier dont manifest.json declare
+ * "id" == addon_id. Ne suppose jamais que le nom du dossier correspond a
+ * l'id (section 8 : "le Core doit fonctionner a partir du manifeste") -
+ * resout au passage l'ecart entre l'id en minuscules des exemples du
+ * brief (ex. "wiimedic") et le nom de dossier en usage
+ * (ex. "WiiMedic") sans dependre d'une convention de casse. */
+pd_error_t pd_addon_find_dir(const char *addons_root, const char *addon_id,
+                              char *out_dir, size_t out_size);
 
 /* Lance l'addon (chainload aller simple - voir docs/return_to_loader.md).
  * Ne revient qu'en cas d'echec de chargement ; en cas de succes, cet
