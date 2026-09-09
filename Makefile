@@ -50,7 +50,7 @@ CFLAGS		:=	-g -O2 -Wall $(MACHDEP) $(INCLUDE)
 CXXFLAGS	:=	$(CFLAGS)
 LDFLAGS		:=	-g $(MACHDEP) -Wl,-Map,$(TARGET).map
 
-LIBS	:=	-lfat -logc -lwiiuse -lbte -lm
+LIBS	:=	-lwiiuse -lbte -lfat -logc -lm
 
 #---------------------------------------------------------------------------------
 CFILES		:=	$(foreach dir,$(SOURCES),$(wildcard $(dir)/*.c))
