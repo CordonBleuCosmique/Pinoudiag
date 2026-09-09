@@ -22,10 +22,37 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <tuxedo/ppc/exception.h>
 
 #include "dol_loader.h"
 
-extern void __exception_closeall(void);
+/* HBC (loader_reloc.c) appelait __exception_closeall(), un symbole d'une
+ * version de libogc bien plus ancienne que celle installee au moment de
+ * cette compilation (devkitPro a modernise libogc entre-temps - nouvelle
+ * API "tuxedo", voir <tuxedo/ppc/exception.h> - et ce symbole n'existe
+ * plus du tout, ni dans les headers ni dans libogc.a). [VERIFIED par
+ * l'utilisateur sur la toolchain reellement installee : grep/nm ne
+ * trouvent rien].
+ *
+ * Remplace ici par l'equivalent moderne : reinitialiser individuellement
+ * chaque gestionnaire d'exception PPC via PPCExcptSetHandler(), pour le
+ * meme objectif que l'appel d'origine (ne pas laisser un gestionnaire
+ * d'exception de PinouDiag actif au moment du saut vers le programme
+ * charge - celui-ci reinitialise de toute facon les siens via son propre
+ * crt0 au demarrage, donc ceci reste une precaution plutot qu'une
+ * dependance stricte du programme cible). [REQUIRES HARDWARE TEST] */
+static void pd_exception_closeall(void) {
+    static const unsigned ids[] = {
+        PPC_EXCPT_RESET, PPC_EXCPT_MCHK, PPC_EXCPT_DSI, PPC_EXCPT_ISI,
+        PPC_EXCPT_IRQ, PPC_EXCPT_ALIGN, PPC_EXCPT_UNDEF, PPC_EXCPT_FPU,
+        PPC_EXCPT_DECR, PPC_EXCPT_SYSCALL, PPC_EXCPT_TRACE, PPC_EXCPT_PM,
+        PPC_EXCPT_BKPT,
+    };
+    size_t i;
+
+    for (i = 0; i < sizeof(ids) / sizeof(ids[0]); i++)
+        PPCExcptSetHandler(ids[i], PPCExcptDefaultHandler);
+}
 
 /* Bornes verifiees par lecture du code HBC (config.h : LD_MIN_ADDR) pour
  * la borne basse. Borne haute reprise de sources secondaires
@@ -171,7 +198,7 @@ void pd_dol_exec(pd_entry_point_t entry) {
      * materiel complet. Point de non-retour a partir d'ici. */
     SYS_ResetSystem(SYS_SHUTDOWN, 0, 0);
 
-    __exception_closeall();
+    pd_exception_closeall();
 
     /* Registres horloge bus/CPU attendus par les DOL construits avec le
      * SDK Nintendo - repris tels quels de loader_reloc.c. */
