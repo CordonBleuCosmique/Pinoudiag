@@ -170,3 +170,43 @@ redistribuer une version modifiée de WiiMedic sous GPLv2 — c'est une décisio
 produit/légale, pas seulement technique. C'est un point qui doit être validé
 explicitement avant d'aller plus loin en implémentation (POC 4/5), plutôt que
 tranché unilatéralement.
+
+## Décision retenue (POC4, après validation utilisateur)
+
+**Option A confirmée.** Implémentation dans `src/core/addon/dol_loader.c`
+(adapté de `loader_reloc.c`/`loader_exec()` de HBC, GPLv2, voir
+`docs/licensing.md`) + `tools/test_dol/` pour la validation POC4.
+
+Précision technique importante par rapport à la formulation initiale du
+brief ("WiiMedic termine → PinouDiag reprend") : ce n'est **pas** un retour
+d'exécution (call/return) — la section 3 ci-dessus a établi que le modèle
+Wii ne le permet pas (services arrêtés, mémoire haute effacée avant le
+saut). L'implémentation retenue est donc :
+
+1. PinouDiag appelle `pd_dol_chainload(addon_path)` — aller simple,
+   n'importe quel état PinouDiag en mémoire est perdu après cet appel.
+2. Le binaire cible (test.dol pour la validation POC4, puis le fork
+   WiiMedic pour POC5) effectue **lui-même** un second `pd_dol_chainload()`
+   vers `PD_LOADER_BOOT_PATH` (`sd:/boot.dol` — le chemin exact que
+   LetterBomb charge, voir `docs/letterbomb.md`) à sa propre sortie, au
+   lieu de `SYS_ResetSystem`/`WII_LaunchTitle`.
+3. PinouDiag redémarre donc **complètement** à chaque retour — c'est
+   pourquoi le fichier de session (`core/session`, POC3) est le mécanisme
+   qui permet de reconnaître "je redémarre après un addon" et de reprendre
+   le workflow à la bonne étape plutôt que de recommencer une session
+   neuve. Aucune intervention manuelle n'est requise (l'utilisateur ne
+   rouvre jamais la lettre LetterBomb lui-même) — l'objectif de la section
+   23 du brief est respecté, mais par un enchaînement de deux chainloads
+   complets plutôt que par un unique appel de sous-routine.
+
+Décision de structure SD associée : le binaire PinouDiag (`boot.dol`) est
+placé directement à la **racine** de la carte SD (`SD:/boot.dol`), qui est
+exactement le chemin que LetterBomb charge — pas de fichier de redirection
+supplémentaire. Le sous-dossier `SD:/PinouDiag/` ne contient que
+`addons/`, `workflows/` et `config/` (voir `Makefile`, cible `sd-image`).
+
+[REQUIRES HARDWARE TEST] Toute la séquence ci-dessus reste non testée sur
+matériel réel (pas de Wii ni de toolchain compilable dans cette session,
+voir `docs/build.md`). Le POC4 (`tools/test_dol/`) est conçu précisément
+pour valider ce mécanisme en isolation avant de l'appliquer au fork
+WiiMedic.

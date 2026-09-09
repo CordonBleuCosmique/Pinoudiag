@@ -32,6 +32,16 @@ typedef enum {
 
 const char *pd_error_str(pd_error_t err);
 
+/* Chemin fixe du binaire PinouDiag sur la carte SD - c'est exactement le
+ * chemin que LetterBomb charge depuis la racine SD (voir
+ * docs/letterbomb.md), et donc aussi le chemin de retour utilise par
+ * tout addon/chainload qui doit rendre la main a PinouDiag (voir
+ * docs/return_to_loader.md, Option A). PinouDiag/addons/workflows/config
+ * restent dans un sous-dossier SD:/PinouDiag/ ; seul le binaire de boot
+ * lui-meme vit a la racine, pour respecter le contrat LetterBomb sans
+ * fichier de redirection supplementaire. */
+#define PD_LOADER_BOOT_PATH "sd:/boot.dol"
+
 /* Section 10 du brief : statuts de resultat normalise */
 typedef enum {
     PD_STATUS_PASS = 0,
