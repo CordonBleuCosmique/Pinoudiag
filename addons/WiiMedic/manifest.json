@@ -1,0 +1,14 @@
+{
+  "id": "wiimedic",
+  "name": "WiiMedic",
+  "version": "1.3.1-pinoudiag1",
+  "platform": "wii",
+  "executable": "boot.dol",
+  "output": "WiiMedic_Report.txt",
+  "output_locations": ["sd:/WiiMedic_Report.txt", "usb:/WiiMedic_Report.txt"],
+  "source": "https://github.com/PowFPS1/WiiMedic",
+  "fork": "third_party/WiiMedic-PinouDiag (voir CHANGES.md)",
+  "license": "GPL-2.0-or-later",
+  "returns_to_loader": true,
+  "notes": "Fork patché pour rendre la main à PinouDiag (sd:/boot.dol) au lieu de lancer HBC ou de reset vers le System Menu - voir docs/return_to_loader.md."
+}

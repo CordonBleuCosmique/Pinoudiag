@@ -10,18 +10,21 @@
   uniquement) — PinouDiag consomme WiiMedic comme **binaire externe**
   (`boot.dol`) exécuté par chainload, pas par lien statique/dynamique. Le
   brief interdit explicitement de réimplémenter WiiMedic.
-- **Modifications** : aucune à ce stade. Si l'option A de
-  `return_to_loader.md` (fork pour retour au loader) est retenue, il
-  faudra :
-  - Conserver la licence GPLv2 sur le fork.
-  - Documenter précisément les modifications par rapport à l'upstream
-    (fichier `CHANGES` ou équivalent).
-  - Redistribuer les sources du fork avec le binaire (ou un lien clair et
-    permanent vers celles-ci).
-  - Ne pas faire passer le binaire modifié pour la release officielle de
-    PowFPS1 (nommage distinct recommandé, ex. `WiiMedic (PinouDiag build)`,
-    et mention claire dans le rapport généré + le `manifest.json` de
-    l'addon).
+- **Modifications** : Option A retenue (voir `return_to_loader.md`) et
+  **implémentée** dans `third_party/WiiMedic-PinouDiag/` (POC4/5) :
+  - Licence GPLv2 conservée telle quelle (`third_party/WiiMedic-PinouDiag/LICENSE`,
+    copie inchangée de l'upstream).
+  - Modifications documentées précisément dans
+    `third_party/WiiMedic-PinouDiag/CHANGES.md` (fichier par fichier, ligne
+    par ligne).
+  - Sources du fork redistribuées intégralement avec le dépôt PinouDiag
+    (pas de lien externe — le code est présent dans ce dépôt).
+  - Nommage distinct appliqué : `WiiMedic (PinouDiag build)`,
+    version suffixée `1.3.1-pinoudiag1`, zip de release nommé
+    `WiiMedic-PinouDiag_v...` (jamais `WiiMedic_v...` seul), bannière
+    explicite en tête du `README.md` du fork.
+  - `addons/WiiMedic/manifest.json` référence explicitement le fork et
+    l'upstream (`source`, `fork`, `license`).
 - **Obligations de redistribution** : la SD `PinouDiag/addons/WiiMedic/`
   contiendra un binaire GPLv2 — la structure de livraison PinouDiag devra
   inclure soit le code source correspondant, soit une offre écrite d'accès

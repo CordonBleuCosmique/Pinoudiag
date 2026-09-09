@@ -24,11 +24,23 @@ etc.).
 ## Procédure de build attendue (d'après les Makefiles WiiMedic et HBC,
 [VERIFIED] par lecture directe, non testée dans ce sandbox)
 
+Trois binaires distincts composent le projet, chacun avec son propre
+Makefile (voir `docs/return_to_loader.md` pour pourquoi ce sont trois
+binaires séparés et non un seul) :
+
 ```bash
 export DEVKITPRO=/opt/devkitpro
 export DEVKITPPC=/opt/devkitpro/devkitPPC
-make            # -> boot.elf, boot.dol
-make dist       # -> zip prêt à distribuer (pattern WiiMedic)
+
+# 1. PinouDiag lui-meme -> boot.dol (a copier a la racine de la carte SD)
+make            # depuis la racine du depot
+make sd-image   # prepare dist/sd/ pret a copier sur la carte
+
+# 2. test.dol (POC4, validation du chainload avant WiiMedic)
+cd tools/test_dol && make
+
+# 3. WiiMedic (fork PinouDiag) -> addons/WiiMedic/boot.dol
+cd third_party/WiiMedic-PinouDiag && make install
 ```
 
 Dépendances : devkitPPC (GCC PowerPC), libogc ≥3.0.0, libfat, wiiuse, bte.
