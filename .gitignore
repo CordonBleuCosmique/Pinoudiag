@@ -1,3 +1,10 @@
+# Nintendo DS (devkitARM/libnds) build artifacts
+*.nds
+*.elf
+*.ds.gba
+*.map
+*.sav
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
