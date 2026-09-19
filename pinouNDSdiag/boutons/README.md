@@ -25,3 +25,9 @@ Pannes liées aux boutons (A/B/X/Y, L/R, Start/Select) et à la croix directionn
 ## Pinouts
 
 _À compléter : schéma des pastilles de contact par bouton._
+
+## Outil logiciel
+
+Le test logiciel des boutons/croix/écran tactile est couvert par
+`../../logiciel/boutons-tactile/` (fork d'Input Test DS, cphx, domaine
+public — voir `PROVENANCE.md` dans ce dossier).
