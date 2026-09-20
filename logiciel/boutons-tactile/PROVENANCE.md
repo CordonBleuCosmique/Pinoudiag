@@ -46,6 +46,15 @@ utilité pour notre build).
 Voir le code source pour le détail exact (écran d'accueil, à propos,
 crédits — conservés tels quels).
 
+## Utilisation dans l'orchestrateur
+
+`../orchestrateur/` reprend le principe de lecture des touches et du
+tactile de ce module (scanKeys/keysHeld/touchRead), mais restructuré en
+liste à cocher avec sortie définie — nécessaire pour un enchaînement
+automatique de tests — au lieu de la démo libre sans fin d'origine. Ce
+dossier-ci reste la version fidèle à l'original, non modifiée
+fonctionnellement.
+
 ## Pourquoi pas les autres outils trouvés (Diagnose, DSdiag) ?
 
 Ces deux outils sont plus complets (batterie, rétroéclairage, WiFi, micro)

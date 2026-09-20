@@ -6,10 +6,23 @@ libnds. Certains sont écrits pour ce projet, d'autres sont des **forks** d'un
 outil open source existant déjà éprouvé — pour ne pas perdre en fiabilité en
 réécrivant à zéro ce qui fonctionne déjà.
 
+## À utiliser en pratique : `orchestrateur/`
+
+**[`orchestrateur/`](orchestrateur/README.md)** est le point d'entrée
+recommandé : un seul `.nds` qui enchaîne automatiquement toutes les étapes de
+diagnostic ci-dessous, écrit un rapport JSON sur la carte SD à chaque
+passage, et ne s'arrête que pour les actions qu'un humain doit faire à la
+place du logiciel (appuyer sur un bouton, toucher l'écran).
+
+`affichage-infos/` et `boutons-tactile/` restent en plus, en tant que
+modules indépendants — utiles pour retester un point précis isolément, ou
+comme base de code pour les prochaines étapes de l'orchestrateur.
+
 ## Modules
 
 | Dossier | Origine | Teste |
 |---|---|---|
+| `orchestrateur/` | Écrit pour Pinoudiag (réutilise le moteur de `boutons-tactile/`) | Enchaîne automatiquement tous les tests ci-dessous + rapport JSON |
 | `affichage-infos/` | Écrit pour Pinoudiag | Affichage ("AFFICHAGE OK"), modèle console, batterie, langue, pseudo firmware |
 | `boutons-tactile/` | Fork d'**Input Test DS** (cphx, domaine public, 2010) — voir `boutons-tactile/PROVENANCE.md` | Croix directionnelle, boutons A/B/X/Y/L/R/Start/Select, écran tactile |
 
@@ -28,38 +41,45 @@ Deux options restent possibles avec eux, sans réécrire leur travail :
   flashcart (ou TWiLight Menu++) en complément de cette suite.
 - Réimplémenter nous-mêmes, dans Pinoudiag, les fonctions qu'ils couvrent et
   qu'on n'a pas encore (rétroéclairage, WiFi, micro...) — c'est la voie
-  suivie pour les prochains modules de `pinouNDSdiag`.
+  suivie pour les prochains modules de `pinouNDSdiag`, à terme intégrés
+  dans `orchestrateur/`.
 
 ## Prérequis pour compiler
 
 - [devkitPro](https://devkitpro.org/wiki/Getting_Started) avec les paquets
-  `devkitARM`, `libnds` et `libmm7`/`libmm9` (maxmod) installés
+  `devkitARM`, `libnds`, `libfat` et `libmm7`/`libmm9` (maxmod) installés
 - La variable d'environnement `DEVKITARM` correctement définie
   (ex : `export DEVKITARM=/opt/devkitpro/devkitARM`)
 - `grit` et `mmutil` dans le `PATH` (fournis par devkitPro, nécessaires pour
-  `boutons-tactile/` qui embarque une image et une musique)
+  `boutons-tactile/` et `orchestrateur/`, qui embarquent une image et une
+  musique)
 
 ## Compilation
 
 Chaque module se compile indépendamment, depuis son propre dossier :
 
 ```sh
+cd logiciel/orchestrateur   && make   # l'outil à utiliser en pratique
 cd logiciel/affichage-infos && make
 cd logiciel/boutons-tactile && make
 ```
 
-Chaque `make` génère son propre `.nds` (`pinouNDSdiag-affichage-infos.nds`,
-`pinouNDSdiag-boutons-tactile.nds`) à la racine du module concerné.
+Chaque `make` génère son propre `.nds` (`pinouNDSdiag-orchestrateur.nds`,
+`pinouNDSdiag-affichage-infos.nds`, `pinouNDSdiag-boutons-tactile.nds`) à la
+racine du module concerné.
 
 ## Test
 
-- Sur flashcart / carte SD (R4, ez-flash, TWiLight Menu++...) : copier les
-  `.nds` générés sur la carte et les lancer depuis le menu de la console.
+- Sur flashcart / carte SD (R4, DSpico, TWiLight Menu++...) : copier les
+  `.nds` générés dans le dossier de jeux de la carte (ex : `Games/` sur
+  DSpico) et les lancer depuis le menu de la console. Le menu de la carte
+  liste tous les `.nds` présents — rien n'empêche d'en garder plusieurs.
 - Sur émulateur (DeSmuME, melonDS...) : ouvrir directement le fichier `.nds`.
+  L'écriture du rapport nécessite une image de carte SD virtuelle
+  correctement configurée dans l'émulateur (sinon l'orchestrateur continue
+  sans bloquer, mais sans enregistrer de rapport).
 
 ## Prochaines étapes
 
-- Test visuel complet des deux écrans (mires de couleur)
-- Test audio (haut-parleurs / prise casque)
-- Test batterie / rétroéclairage / WiFi / micro (voir section ci-dessus)
-- Menu de lancement unique regroupant tous les modules de la suite
+- Ajouter les étapes audio / WiFi / rétroéclairage à `orchestrateur/`
+- Test visuel complet des deux écrans (mires de couleur) dans l'orchestrateur
