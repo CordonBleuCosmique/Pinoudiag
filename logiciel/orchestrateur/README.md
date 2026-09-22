@@ -28,8 +28,22 @@ ce dossier est la version "à lancer et laisser tourner".
    bas d'une couleur unie (rouge, vert, bleu, blanc, noir), tu regardes et
    signales un défaut (B) ou confirmes (A) — voir "Détection de pixels
    morts" ci-dessous.
-6. **Résumé + rapport** (auto) : écrit un fichier JSON sur la carte SD, puis
+6. **Capteur de fermeture** (semi-auto) : demande de fermer puis rouvrir le
+   capot, détecte automatiquement le changement d'état — voir "Capteur de
+   fermeture" ci-dessous.
+7. **Résumé + rapport** (auto) : écrit un fichier JSON sur la carte SD, puis
    repropose immédiatement de tester une autre console (appui sur A).
+
+## Principe "ignoré ≠ défaut"
+
+Chaque étape qui peut être ignorée (accessoire absent, maintien de SELECT,
+délai dépassé...) l'enregistre comme `"non_teste"` dans le rapport JSON, et
+**jamais** comme `"probleme"`. Concerné : boutons ignorés en bloc via
+SELECT, tactile ignoré, casque non branché (X), capteur de fermeture non
+testé. L'idée : ne jamais faire dire au rapport qu'un composant est
+défaillant alors qu'il n'a en réalité pas pu être observé — sinon on risque
+un diagnostic erroné (ex. déclarer le casque en panne juste parce qu'aucun
+casque n'était disponible au moment du test).
 
 ## Visualiseur audio
 
@@ -81,6 +95,23 @@ bitmap (celui qui affiche le logo au démarrage) — `lcdMainOnTop()` /
 reçoit ce moteur, sans dupliquer le code de remplissage couleur. La console
 texte (instructions) suit automatiquement sur l'écran resté libre.
 
+## Capteur de fermeture
+
+Demande de fermer puis rouvrir le capot ; dès que l'état du capteur
+(`KEY_LID`) change par rapport à son état de départ, le test est validé.
+Volontairement **agnostique de la polarité** : le code ne suppose jamais
+quelle valeur du bit correspond à "ouvert" ou "fermé" (cette info n'est pas
+garantie documentée de façon fiable côté libnds) — il détecte juste qu'un
+changement a eu lieu, ce qui suffit à prouver que le capteur réagit
+physiquement. Maintenir SELECT ~1,5s ou attendre 15s sans changement marque
+le test comme non testé (pas comme défaut).
+
+⚠️ **Piège évité** : fermer le capot déclenche normalement la mise en veille
+automatique de la console (comportement pensé pour les jeux, géré par
+`pmMainLoop()`), ce qui figerait le programme pile pendant ce test.
+`pmSetSleepAllowed(false)` est appelé une fois au tout début de `main()`
+pour neutraliser ça sur l'ensemble du programme, pas seulement cette étape.
+
 ## Identifiant "ticket"
 
 Il n'existe pas d'API fiable pour lire le vrai numéro de série de la
@@ -109,8 +140,8 @@ Exemple de contenu :
   "batterie": "12/15",
   "langue": "Francais",
   "pseudo": "",
-  "boutons": { "testes": 12, "total": 12, "detail": { "A": true, "...": true } },
-  "tactile": { "teste": true, "x": 128, "y": 96 },
+  "boutons": { "testes": 12, "total": 12, "detail": { "A": "ok", "...": "ok" } },
+  "tactile": { "resultat": "ok", "x": 128, "y": 96 },
   "audio": {
     "haut_parleurs": {
       "teste": true,
@@ -130,9 +161,14 @@ Exemple de contenu :
       "Blanc": { "defaut_haut": false, "defaut_bas": false },
       "Noir":  { "defaut_haut": false, "defaut_bas": false }
     }
-  }
+  },
+  "charniere": { "resultat": "ok" }
 }
 ```
+
+Un bouton, le tactile ou la charnière ignorés apparaissent avec
+`"resultat": "non_teste"` (boutons : `"non_teste"` dans `detail`) plutôt
+que `"probleme"` — voir "Principe *ignoré ≠ défaut*" ci-dessus.
 
 Si la carte SD n'est pas accessible (pas de pilote DLDI reconnu), le
 programme continue quand même et affiche simplement que le rapport n'a pas
@@ -168,7 +204,8 @@ Génère `pinouNDSdiag-orchestrateur.nds`.
 
 ## Prochaines étapes
 
-- Ajouter l'étape WiFi quand elle sera écrite
+- Ajouter les étapes WiFi et micro (test 100% automatique, sans bouton :
+  voir la discussion sur les prochains tests possibles) quand elles seront écrites
 - Rendre le seuil de "SELECT maintenu" configurable si 1,5s s'avère pas assez / trop
 - Collecter des `niveau_capte_pic` de plusieurs consoles saines pour définir
   une plage "normale" indicative (voir "Visualiseur audio" ci-dessus)

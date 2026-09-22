@@ -38,6 +38,22 @@
 	verifier sa propre dalle. Utilise lcdMainOnTop()/lcdMainOnBottom()
 	pour afficher la meme surface pleine-couleur sur l'ecran du haut puis
 	celui du bas, sans dupliquer le code d'affichage.
+
+	L'etape 6 (charniere) verifie le capteur de fermeture (KEY_LID) : on
+	demande de fermer puis rouvrir le capot et on detecte tout changement
+	par rapport a l'etat de depart, sans supposer quelle valeur du bit
+	correspond a "ouvert" ou "ferme" (cette polarite n'est pas garantie
+	documentee de facon fiable, autant ne pas en dependre). Important :
+	pmMainLoop() met normalement la console en veille automatiquement des
+	que le capot se ferme (comportement pense pour les jeux), ce qui
+	figerait tout le programme au pire moment - d'ou pmSetSleepAllowed(false)
+	en tout debut de main().
+
+	Principe "skip != defaut" (applique aux etapes boutons, tactile,
+	casque et charniere) : quand une etape est ignoree (accessoire absent,
+	SELECT maintenu, timeout...), le rapport JSON ecrit "non_teste" et non
+	"probleme" - ne jamais laisser croire a un defaut confirme qui n'a en
+	realite pas pu etre observe.
 ---------------------------------------------------------------------------*/
 #include <nds.h>
 #include <maxmod9.h>
@@ -113,7 +129,7 @@ static const char *nomLangue(unsigned langue) {
 
 static void etapeInfosConsole(InfosConsole *infos) {
 	iprintf("\x1b[2J");
-	iprintf("== Etape 1/5 : Infos console ==\n\n");
+	iprintf("== Etape 1/6 : Infos console ==\n\n");
 
 	if (isDSiMode()) {
 		strcpy(infos->modele, "Nintendo DSi");
@@ -184,7 +200,7 @@ static void etapeBoutons(ResultatBoutons *resultat, bool teste[NB_BOUTONS]) {
 		int held = keysHeld();
 
 		iprintf("\x1b[2J");
-		iprintf("== Etape 2/5 : Boutons ==\n\n");
+		iprintf("== Etape 2/6 : Boutons ==\n\n");
 		iprintf("Appuie sur chaque bouton\nrestant :\n\n");
 
 		int restants = 0;
@@ -225,7 +241,7 @@ static void etapeBoutons(ResultatBoutons *resultat, bool teste[NB_BOUTONS]) {
 	}
 
 	iprintf("\x1b[2J");
-	iprintf("== Etape 2/5 : Boutons ==\n\n");
+	iprintf("== Etape 2/6 : Boutons ==\n\n");
 	iprintf("%d/%d boutons testes OK\n", resultat->testes, resultat->total);
 	if (resultat->ignores > 0) {
 		iprintf("%d ignores manuellement\n", resultat->ignores);
@@ -239,6 +255,7 @@ static void etapeBoutons(ResultatBoutons *resultat, bool teste[NB_BOUTONS]) {
 
 typedef struct {
 	bool teste;
+	bool ignore;
 	int dernierX;
 	int dernierY;
 } ResultatTactile;
@@ -246,8 +263,10 @@ typedef struct {
 static void etapeTactile(ResultatTactile *resultat) {
 	touchPosition touch;
 	resultat->teste = false;
+	resultat->ignore = false;
 	resultat->dernierX = -1;
 	resultat->dernierY = -1;
+	int selectMaintenuFrames = 0;
 
 	while (pmMainLoop()) {
 		swiWaitForVBlank();
@@ -256,13 +275,24 @@ static void etapeTactile(ResultatTactile *resultat) {
 		int held = keysHeld();
 
 		iprintf("\x1b[2J");
-		iprintf("== Etape 3/5 : Tactile ==\n\n");
+		iprintf("== Etape 3/6 : Tactile ==\n\n");
 		iprintf("Touche l'ecran une fois\n\n");
+		iprintf("(maintiens SELECT ~1.5s\npour ignorer ce test)\n");
 
 		if (held & KEY_TOUCH) {
 			resultat->teste = true;
 			resultat->dernierX = touch.px;
 			resultat->dernierY = touch.py;
+		}
+
+		if (held & KEY_SELECT) {
+			selectMaintenuFrames++;
+			if (selectMaintenuFrames > 90) {
+				resultat->ignore = true;
+				break;
+			}
+		} else {
+			selectMaintenuFrames = 0;
 		}
 
 		if (resultat->teste) {
@@ -271,7 +301,8 @@ static void etapeTactile(ResultatTactile *resultat) {
 		}
 	}
 
-	attendreValidation(resultat->teste ? "Tactile OK" : "Tactile non teste");
+	attendreValidation(resultat->teste ? "Tactile OK" :
+		(resultat->ignore ? "Tactile ignore" : "Tactile non teste"));
 }
 
 /* --------------------------------------------------------------------- */
@@ -356,7 +387,7 @@ static void etapeAudio(ResultatAudio *resultat) {
 
 	if (!tonBuffer || !tamponMic) {
 		iprintf("\x1b[2J");
-		iprintf("== Etape 4/5 : Audio ==\n\n");
+		iprintf("== Etape 4/6 : Audio ==\n\n");
 		iprintf("Memoire insuffisante,\ntest audio saute.\n");
 		attendreValidation("Continuer");
 		if (tonBuffer) free(tonBuffer);
@@ -396,7 +427,7 @@ static void etapeAudio(ResultatAudio *resultat) {
 		}
 
 		iprintf("\x1b[2J");
-		iprintf("== Etape 4/5 : Audio ==\n\n");
+		iprintf("== Etape 4/6 : Audio ==\n\n");
 		iprintf("Son de test %dHz emis\na fond par les\nhaut-parleurs.\n\n", TON_FREQ_HZ);
 		iprintf("Capte par le micro :\n");
 		int barres = dernierNiveau / 150;
@@ -425,7 +456,7 @@ static void etapeAudio(ResultatAudio *resultat) {
 
 	/* --- Casque : pas mesurable par le micro, validation a l'oreille --- */
 	iprintf("\x1b[2J");
-	iprintf("== Etape 4/5 : Audio ==\n\n");
+	iprintf("== Etape 4/6 : Audio ==\n\n");
 	iprintf("Branche un casque puis\necoute le son de test.\n\n");
 	iprintf("(A) casque OK\n(B) probleme\n(X) pas teste\n");
 
@@ -516,7 +547,7 @@ static void etapeEcran(ResultatEcran *resultat) {
 		   la console texte (instructions) est donc en bas. */
 		lcdMainOnTop();
 		iprintf("\x1b[2J");
-		iprintf("== Etape 5/5 : Ecran ==\n\n");
+		iprintf("== Etape 5/6 : Ecran ==\n\n");
 		iprintf("Couleur : %s\n", NOMS_COULEURS_ECRAN[c]);
 		iprintf("-> Ecran du HAUT\n\n");
 		iprintf("Pixel mort/colore\nvisible ?\n\n");
@@ -530,7 +561,7 @@ static void etapeEcran(ResultatEcran *resultat) {
 		   console texte (donc ces mêmes instructions) passe en haut. */
 		lcdMainOnBottom();
 		iprintf("\x1b[2J");
-		iprintf("== Etape 5/5 : Ecran ==\n\n");
+		iprintf("== Etape 5/6 : Ecran ==\n\n");
 		iprintf("Couleur : %s\n", NOMS_COULEURS_ECRAN[c]);
 		iprintf("-> Ecran du BAS\n\n");
 		iprintf("Pixel mort/colore\nvisible ?\n\n");
@@ -545,11 +576,76 @@ static void etapeEcran(ResultatEcran *resultat) {
 	decompress(logoBitmap, BG_GFX, LZ77Vram);
 
 	iprintf("\x1b[2J");
-	iprintf("== Etape 5/5 : Ecran ==\n\n");
+	iprintf("== Etape 5/6 : Ecran ==\n\n");
 	if (resultat->nbDefauts == 0) {
 		iprintf("Aucun defaut signale\nsur les %d couleurs.\n", NB_COULEURS_ECRAN);
 	} else {
 		iprintf("%d defaut(s) signale(s).\n", resultat->nbDefauts);
+	}
+	attendreValidation("Continuer");
+}
+
+/* --------------------------------------------------------------------- */
+/* Etape 6 : capteur de fermeture (charniere)                             */
+/* --------------------------------------------------------------------- */
+
+#define CHARNIERE_TIMEOUT_FRAMES (60 * 15)  /* ~15s a 60Hz */
+
+typedef struct {
+	bool teste;   /* un changement d'etat du capteur a ete detecte */
+	bool ignore;  /* teste=false ET ignore=false -> non teste (timeout) */
+} ResultatCharniere;
+
+/* Ne suppose pas quelle valeur du bit correspond a "ouvert" ou "ferme" -
+   detecte juste un changement par rapport a l'etat de depart, ce qui
+   suffit a prouver que le capteur reagit physiquement. */
+static void etapeCharniere(ResultatCharniere *resultat) {
+	resultat->teste = false;
+	resultat->ignore = false;
+
+	scanKeys();
+	int etatInitial = keysCurrent() & KEY_LID;
+	int selectMaintenuFrames = 0;
+	int compteurFrames = 0;
+
+	while (pmMainLoop()) {
+		swiWaitForVBlank();
+		scanKeys();
+
+		iprintf("\x1b[2J");
+		iprintf("== Etape 6/6 : Charniere ==\n\n");
+		iprintf("Ferme puis rouvre\nle capot.\n\n");
+		iprintf("(maintiens SELECT ~1.5s\npour ignorer ce test)\n");
+
+		int etatCourant = keysCurrent() & KEY_LID;
+		if (etatCourant != etatInitial) {
+			resultat->teste = true;
+			break;
+		}
+
+		if (keysHeld() & KEY_SELECT) {
+			selectMaintenuFrames++;
+			if (selectMaintenuFrames > 90) {
+				resultat->ignore = true;
+				break;
+			}
+		} else {
+			selectMaintenuFrames = 0;
+		}
+
+		compteurFrames++;
+		if (compteurFrames > CHARNIERE_TIMEOUT_FRAMES) {
+			resultat->ignore = true;
+			break;
+		}
+	}
+
+	iprintf("\x1b[2J");
+	iprintf("== Etape 6/6 : Charniere ==\n\n");
+	if (resultat->teste) {
+		iprintf("Changement detecte :\ncapteur OK\n");
+	} else {
+		iprintf("Aucun changement\ndetecte (non teste).\n");
 	}
 	attendreValidation("Continuer");
 }
@@ -561,7 +657,7 @@ static void etapeEcran(ResultatEcran *resultat) {
 static void ecrireRapport(int ticket, const InfosConsole *infos,
 	const ResultatBoutons *boutons, const bool testeBoutons[NB_BOUTONS],
 	const ResultatTactile *tactile, const ResultatAudio *audio,
-	const ResultatEcran *ecran) {
+	const ResultatEcran *ecran, const ResultatCharniere *charniere) {
 
 	if (!fatInitDefault()) {
 		iprintf("\nCarte SD non accessible,\nrapport non enregistre.\n");
@@ -614,14 +710,20 @@ static void ecrireRapport(int ticket, const InfosConsole *infos,
 	fprintf(f, "    \"total\": %d,\n", boutons->total);
 	fprintf(f, "    \"detail\": {\n");
 	for (int i = 0; i < NB_BOUTONS; i++) {
-		fprintf(f, "      \"%s\": %s%s\n", NOMS_BOUTONS[i],
-			testeBoutons[i] ? "true" : "false",
+		/* teste[i]==false signifie toujours "pas encore atteint quand le
+		   technicien a arrete le test" (via SELECT), jamais "confirme
+		   casse" : la boucle ne s'arrete que si tout est teste ou si
+		   le reste est ignore d'un coup. D'ou "non_teste" et pas
+		   "probleme" ici, pour ne pas laisser croire a un defaut
+		   confirme qui n'a pas ete observe. */
+		fprintf(f, "      \"%s\": \"%s\"%s\n", NOMS_BOUTONS[i],
+			testeBoutons[i] ? "ok" : "non_teste",
 			(i < NB_BOUTONS - 1) ? "," : "");
 	}
 	fprintf(f, "    }\n");
 	fprintf(f, "  },\n");
 	fprintf(f, "  \"tactile\": {\n");
-	fprintf(f, "    \"teste\": %s,\n", tactile->teste ? "true" : "false");
+	fprintf(f, "    \"resultat\": \"%s\",\n", tactile->teste ? "ok" : "non_teste");
 	fprintf(f, "    \"x\": %d,\n", tactile->dernierX);
 	fprintf(f, "    \"y\": %d\n", tactile->dernierY);
 	fprintf(f, "  },\n");
@@ -649,6 +751,9 @@ static void ecrireRapport(int ticket, const InfosConsole *infos,
 			(i < NB_COULEURS_ECRAN - 1) ? "," : "");
 	}
 	fprintf(f, "    }\n");
+	fprintf(f, "  },\n");
+	fprintf(f, "  \"charniere\": {\n");
+	fprintf(f, "    \"resultat\": \"%s\"\n", charniere->teste ? "ok" : "non_teste");
 	fprintf(f, "  }\n");
 	fprintf(f, "}\n");
 
@@ -662,6 +767,12 @@ static void ecrireRapport(int ticket, const InfosConsole *infos,
 /* --------------------------------------------------------------------- */
 
 int main(void) {
+	/* Empeche la mise en veille automatique quand le capot se ferme :
+	   pmMainLoop() la declenche par defaut, ce qui figerait tout le
+	   programme (utile pour un jeu, pas pour un outil de diagnostic -
+	   et carrement genant pour l'etape 6 qui teste justement le capot). */
+	pmSetSleepAllowed(false);
+
 	videoSetMode(MODE_5_2D);
 	videoSetModeSub(MODE_1_2D);
 	vramSetBankA(VRAM_A_MAIN_BG);
@@ -699,6 +810,9 @@ int main(void) {
 		ResultatEcran resultatEcran;
 		etapeEcran(&resultatEcran);
 
+		ResultatCharniere resultatCharniere;
+		etapeCharniere(&resultatCharniere);
+
 		iprintf("\x1b[2J");
 		iprintf("== Resume (ticket %04d) ==\n\n", ticket);
 		iprintf("Modele    : %s\n", infos.modele);
@@ -712,8 +826,9 @@ int main(void) {
 			!resultatAudio.casqueTeste ? "non teste" : (resultatAudio.casqueOk ? "OK" : "probleme"));
 		iprintf("Ecran     : %s\n",
 			resultatEcran.nbDefauts == 0 ? "OK" : "defauts signales");
+		iprintf("Charniere : %s\n", resultatCharniere.teste ? "OK" : "non teste");
 
-		ecrireRapport(ticket, &infos, &resultatBoutons, testeBoutons, &resultatTactile, &resultatAudio, &resultatEcran);
+		ecrireRapport(ticket, &infos, &resultatBoutons, testeBoutons, &resultatTactile, &resultatAudio, &resultatEcran, &resultatCharniere);
 
 		iprintf("\n(A) console suivante\n");
 	}
