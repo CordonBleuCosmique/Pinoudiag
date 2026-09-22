@@ -24,7 +24,11 @@ ce dossier est la version "à lancer et laisser tourner".
    direct à l'écran — voir "Visualiseur audio" ci-dessous. Puis demande de
    brancher un casque et de valider à l'oreille (le micro ne peut pas
    entendre ce qui sort dans un casque).
-5. **Résumé + rapport** (auto) : écrit un fichier JSON sur la carte SD, puis
+5. **Écran / pixels morts** (manuel) : remplit l'écran du haut puis celui du
+   bas d'une couleur unie (rouge, vert, bleu, blanc, noir), tu regardes et
+   signales un défaut (B) ou confirmes (A) — voir "Détection de pixels
+   morts" ci-dessous.
+6. **Résumé + rapport** (auto) : écrit un fichier JSON sur la carte SD, puis
    repropose immédiatement de tester une autre console (appui sur A).
 
 ## Visualiseur audio
@@ -56,6 +60,26 @@ exemplaire de console à l'autre. Elle sert à deux choses :
 Le test du casque, lui, reste une validation purement à l'oreille (bouton
 A/B/X) : rien sur la DS ne permet de savoir électroniquement ce qui sort
 dans un casque branché.
+
+## Détection de pixels morts
+
+Pour chaque couleur (rouge, vert, bleu, blanc, noir), l'écran du **haut**
+est rempli entièrement de cette couleur en premier ; tu regardes et appuies
+sur **A** (rien à signaler) ou **B** (pixel mort/coloré/bloqué visible),
+puis le même remplissage passe sur l'écran du **bas** et la question se
+repose. 5 couleurs × 2 écrans = 10 vérifications au total par passage.
+
+Contrairement au test audio, il n'y a ici **aucune mesure automatique
+possible** : rien sur la DS ne permet au logiciel de voir sa propre dalle,
+c'est un test entièrement à l'œil humain — exactement le genre d'étape que
+l'orchestrateur est censé laisser à un humain plutôt que d'essayer de
+deviner.
+
+Technique : les deux écrans sont pilotés par le *même* moteur d'affichage
+bitmap (celui qui affiche le logo au démarrage) — `lcdMainOnTop()` /
+`lcdMainOnBottom()` basculent simplement lequel des deux écrans physiques
+reçoit ce moteur, sans dupliquer le code de remplissage couleur. La console
+texte (instructions) suit automatiquement sur l'écran resté libre.
 
 ## Identifiant "ticket"
 
@@ -96,6 +120,16 @@ Exemple de contenu :
       "frequence_mesuree_hz": 998
     },
     "casque": { "teste": true, "resultat": "ok" }
+  },
+  "ecran": {
+    "nb_defauts": 0,
+    "detail": {
+      "Rouge": { "defaut_haut": false, "defaut_bas": false },
+      "Vert":  { "defaut_haut": false, "defaut_bas": false },
+      "Bleu":  { "defaut_haut": false, "defaut_bas": false },
+      "Blanc": { "defaut_haut": false, "defaut_bas": false },
+      "Noir":  { "defaut_haut": false, "defaut_bas": false }
+    }
   }
 }
 ```
@@ -134,7 +168,10 @@ Génère `pinouNDSdiag-orchestrateur.nds`.
 
 ## Prochaines étapes
 
-- Ajouter les étapes WiFi / rétroéclairage (mires de couleur) quand elles seront écrites
+- Ajouter l'étape WiFi quand elle sera écrite
 - Rendre le seuil de "SELECT maintenu" configurable si 1,5s s'avère pas assez / trop
 - Collecter des `niveau_capte_pic` de plusieurs consoles saines pour définir
   une plage "normale" indicative (voir "Visualiseur audio" ci-dessus)
+- Étendre le test écran : nuances de gris (pixels bloqués parfois visibles
+  uniquement à mi-luminosité), ou permettre de toucher l'endroit exact du
+  défaut sur l'écran du bas (tactile) pour le noter dans le rapport

@@ -30,6 +30,14 @@
 	rapport JSON). Le casque ne peut pas etre mesure de cette facon (le
 	micro n'entend pas ce qui sort dans les ecouteurs) : validation a
 	l'oreille uniquement pour cette partie-la.
+
+	L'etape 5 (ecran) detecte les pixels morts/bloques : remplit chaque
+	ecran d'une couleur unie (rouge/vert/bleu/blanc/noir), le technicien
+	regarde et signale un defaut (bouton B) ou confirme (A). Detection
+	visuelle humaine obligatoire - aucun capteur ne permet au logiciel de
+	verifier sa propre dalle. Utilise lcdMainOnTop()/lcdMainOnBottom()
+	pour afficher la meme surface pleine-couleur sur l'ecran du haut puis
+	celui du bas, sans dupliquer le code d'affichage.
 ---------------------------------------------------------------------------*/
 #include <nds.h>
 #include <maxmod9.h>
@@ -105,7 +113,7 @@ static const char *nomLangue(unsigned langue) {
 
 static void etapeInfosConsole(InfosConsole *infos) {
 	iprintf("\x1b[2J");
-	iprintf("== Etape 1/4 : Infos console ==\n\n");
+	iprintf("== Etape 1/5 : Infos console ==\n\n");
 
 	if (isDSiMode()) {
 		strcpy(infos->modele, "Nintendo DSi");
@@ -176,7 +184,7 @@ static void etapeBoutons(ResultatBoutons *resultat, bool teste[NB_BOUTONS]) {
 		int held = keysHeld();
 
 		iprintf("\x1b[2J");
-		iprintf("== Etape 2/4 : Boutons ==\n\n");
+		iprintf("== Etape 2/5 : Boutons ==\n\n");
 		iprintf("Appuie sur chaque bouton\nrestant :\n\n");
 
 		int restants = 0;
@@ -217,7 +225,7 @@ static void etapeBoutons(ResultatBoutons *resultat, bool teste[NB_BOUTONS]) {
 	}
 
 	iprintf("\x1b[2J");
-	iprintf("== Etape 2/4 : Boutons ==\n\n");
+	iprintf("== Etape 2/5 : Boutons ==\n\n");
 	iprintf("%d/%d boutons testes OK\n", resultat->testes, resultat->total);
 	if (resultat->ignores > 0) {
 		iprintf("%d ignores manuellement\n", resultat->ignores);
@@ -248,7 +256,7 @@ static void etapeTactile(ResultatTactile *resultat) {
 		int held = keysHeld();
 
 		iprintf("\x1b[2J");
-		iprintf("== Etape 3/4 : Tactile ==\n\n");
+		iprintf("== Etape 3/5 : Tactile ==\n\n");
 		iprintf("Touche l'ecran une fois\n\n");
 
 		if (held & KEY_TOUCH) {
@@ -348,7 +356,7 @@ static void etapeAudio(ResultatAudio *resultat) {
 
 	if (!tonBuffer || !tamponMic) {
 		iprintf("\x1b[2J");
-		iprintf("== Etape 4/4 : Audio ==\n\n");
+		iprintf("== Etape 4/5 : Audio ==\n\n");
 		iprintf("Memoire insuffisante,\ntest audio saute.\n");
 		attendreValidation("Continuer");
 		if (tonBuffer) free(tonBuffer);
@@ -388,7 +396,7 @@ static void etapeAudio(ResultatAudio *resultat) {
 		}
 
 		iprintf("\x1b[2J");
-		iprintf("== Etape 4/4 : Audio ==\n\n");
+		iprintf("== Etape 4/5 : Audio ==\n\n");
 		iprintf("Son de test %dHz emis\na fond par les\nhaut-parleurs.\n\n", TON_FREQ_HZ);
 		iprintf("Capte par le micro :\n");
 		int barres = dernierNiveau / 150;
@@ -417,7 +425,7 @@ static void etapeAudio(ResultatAudio *resultat) {
 
 	/* --- Casque : pas mesurable par le micro, validation a l'oreille --- */
 	iprintf("\x1b[2J");
-	iprintf("== Etape 4/4 : Audio ==\n\n");
+	iprintf("== Etape 4/5 : Audio ==\n\n");
 	iprintf("Branche un casque puis\necoute le son de test.\n\n");
 	iprintf("(A) casque OK\n(B) probleme\n(X) pas teste\n");
 
@@ -449,12 +457,111 @@ static void etapeAudio(ResultatAudio *resultat) {
 }
 
 /* --------------------------------------------------------------------- */
+/* Etape 5 : ecran / pixels morts                                         */
+/* --------------------------------------------------------------------- */
+
+#define NB_COULEURS_ECRAN 5
+
+static const char *NOMS_COULEURS_ECRAN[NB_COULEURS_ECRAN] = {
+	"Rouge", "Vert", "Bleu", "Blanc", "Noir"
+};
+
+static const u16 VALEURS_COULEURS_ECRAN[NB_COULEURS_ECRAN] = {
+	(u16)(RGB15(31, 0, 0) | BIT(15)),
+	(u16)(RGB15(0, 31, 0) | BIT(15)),
+	(u16)(RGB15(0, 0, 31) | BIT(15)),
+	(u16)(RGB15(31, 31, 31) | BIT(15)),
+	(u16)(RGB15(0, 0, 0) | BIT(15)),
+};
+
+typedef struct {
+	bool defautHaut[NB_COULEURS_ECRAN];
+	bool defautBas[NB_COULEURS_ECRAN];
+	int nbDefauts;
+} ResultatEcran;
+
+static void remplirEcranPrincipal(u16 couleur) {
+	for (int i = 0; i < 256 * 192; i++) {
+		BG_GFX[i] = couleur;
+	}
+}
+
+/* Attend A (RAS) ou B (defaut) ; retourne true si defaut signale. */
+static bool attendreVerdictEcran(void) {
+	while (pmMainLoop()) {
+		swiWaitForVBlank();
+		scanKeys();
+		int appui = keysDown();
+		if (appui & KEY_A) {
+			return false;
+		}
+		if (appui & KEY_B) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static void etapeEcran(ResultatEcran *resultat) {
+	resultat->nbDefauts = 0;
+	for (int c = 0; c < NB_COULEURS_ECRAN; c++) {
+		resultat->defautHaut[c] = false;
+		resultat->defautBas[c] = false;
+	}
+
+	for (int c = 0; c < NB_COULEURS_ECRAN; c++) {
+		remplirEcranPrincipal(VALEURS_COULEURS_ECRAN[c]);
+
+		/* Ecran du haut : le moteur principal (bitmap) y est par defaut,
+		   la console texte (instructions) est donc en bas. */
+		lcdMainOnTop();
+		iprintf("\x1b[2J");
+		iprintf("== Etape 5/5 : Ecran ==\n\n");
+		iprintf("Couleur : %s\n", NOMS_COULEURS_ECRAN[c]);
+		iprintf("-> Ecran du HAUT\n\n");
+		iprintf("Pixel mort/colore\nvisible ?\n\n");
+		iprintf("(A) RAS   (B) Defaut\n");
+		if (attendreVerdictEcran()) {
+			resultat->defautHaut[c] = true;
+			resultat->nbDefauts++;
+		}
+
+		/* Ecran du bas : on bascule le moteur principal en bas, la
+		   console texte (donc ces mêmes instructions) passe en haut. */
+		lcdMainOnBottom();
+		iprintf("\x1b[2J");
+		iprintf("== Etape 5/5 : Ecran ==\n\n");
+		iprintf("Couleur : %s\n", NOMS_COULEURS_ECRAN[c]);
+		iprintf("-> Ecran du BAS\n\n");
+		iprintf("Pixel mort/colore\nvisible ?\n\n");
+		iprintf("(A) RAS   (B) Defaut\n");
+		if (attendreVerdictEcran()) {
+			resultat->defautBas[c] = true;
+			resultat->nbDefauts++;
+		}
+	}
+
+	lcdMainOnTop();
+	decompress(logoBitmap, BG_GFX, LZ77Vram);
+
+	iprintf("\x1b[2J");
+	iprintf("== Etape 5/5 : Ecran ==\n\n");
+	if (resultat->nbDefauts == 0) {
+		iprintf("Aucun defaut signale\nsur les %d couleurs.\n", NB_COULEURS_ECRAN);
+	} else {
+		iprintf("%d defaut(s) signale(s).\n", resultat->nbDefauts);
+	}
+	attendreValidation("Continuer");
+}
+
+/* --------------------------------------------------------------------- */
 /* Rapport JSON sur la carte SD                                           */
 /* --------------------------------------------------------------------- */
 
 static void ecrireRapport(int ticket, const InfosConsole *infos,
 	const ResultatBoutons *boutons, const bool testeBoutons[NB_BOUTONS],
-	const ResultatTactile *tactile, const ResultatAudio *audio) {
+	const ResultatTactile *tactile, const ResultatAudio *audio,
+	const ResultatEcran *ecran) {
 
 	if (!fatInitDefault()) {
 		iprintf("\nCarte SD non accessible,\nrapport non enregistre.\n");
@@ -530,6 +637,18 @@ static void ecrireRapport(int ticket, const InfosConsole *infos,
 	fprintf(f, "      \"teste\": %s,\n", audio->casqueTeste ? "true" : "false");
 	fprintf(f, "      \"resultat\": \"%s\"\n", !audio->casqueTeste ? "non_teste" : (audio->casqueOk ? "ok" : "probleme"));
 	fprintf(f, "    }\n");
+	fprintf(f, "  },\n");
+	fprintf(f, "  \"ecran\": {\n");
+	fprintf(f, "    \"nb_defauts\": %d,\n", ecran->nbDefauts);
+	fprintf(f, "    \"detail\": {\n");
+	for (int i = 0; i < NB_COULEURS_ECRAN; i++) {
+		fprintf(f, "      \"%s\": { \"defaut_haut\": %s, \"defaut_bas\": %s }%s\n",
+			NOMS_COULEURS_ECRAN[i],
+			ecran->defautHaut[i] ? "true" : "false",
+			ecran->defautBas[i] ? "true" : "false",
+			(i < NB_COULEURS_ECRAN - 1) ? "," : "");
+	}
+	fprintf(f, "    }\n");
 	fprintf(f, "  }\n");
 	fprintf(f, "}\n");
 
@@ -577,6 +696,9 @@ int main(void) {
 		ResultatAudio resultatAudio;
 		etapeAudio(&resultatAudio);
 
+		ResultatEcran resultatEcran;
+		etapeEcran(&resultatEcran);
+
 		iprintf("\x1b[2J");
 		iprintf("== Resume (ticket %04d) ==\n\n", ticket);
 		iprintf("Modele    : %s\n", infos.modele);
@@ -588,8 +710,10 @@ int main(void) {
 			resultatAudio.frequenceMesureeHz);
 		iprintf("Casque    : %s\n",
 			!resultatAudio.casqueTeste ? "non teste" : (resultatAudio.casqueOk ? "OK" : "probleme"));
+		iprintf("Ecran     : %s\n",
+			resultatEcran.nbDefauts == 0 ? "OK" : "defauts signales");
 
-		ecrireRapport(ticket, &infos, &resultatBoutons, testeBoutons, &resultatTactile, &resultatAudio);
+		ecrireRapport(ticket, &infos, &resultatBoutons, testeBoutons, &resultatTactile, &resultatAudio, &resultatEcran);
 
 		iprintf("\n(A) console suivante\n");
 	}

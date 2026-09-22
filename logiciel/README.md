@@ -81,5 +81,6 @@ racine du module concerné.
 
 ## Prochaines étapes
 
-- Ajouter les étapes audio / WiFi / rétroéclairage à `orchestrateur/`
-- Test visuel complet des deux écrans (mires de couleur) dans l'orchestrateur
+- Ajouter l'étape WiFi à `orchestrateur/`
+- Étendre le test écran (nuances de gris, coordonnées tactiles du défaut sur
+  l'écran du bas) — voir `orchestrateur/README.md`
