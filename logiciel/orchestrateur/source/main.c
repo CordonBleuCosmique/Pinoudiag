@@ -19,13 +19,26 @@
 	mais restructure en liste a cocher avec sortie definie, puisqu'un
 	orchestrateur automatique a besoin d'un etat "termine" - contrairement
 	a la demo libre d'origine (voir ../boutons-tactile/PROVENANCE.md).
+
+	L'etape 4 (audio) joue un son de test connu et l'ecoute en meme temps
+	via le micro (bouclage acoustique haut-parleurs -> micro), pour
+	afficher un niveau et une frequence mesures en direct plutot que de
+	se fier uniquement a l'oreille du technicien. Ce n'est PAS une mesure
+	calibree (pas de dB SPL absolu : rien sur la DS ne permet de calibrer
+	ca) - c'est une valeur relative, utile pour comparer plusieurs
+	consoles entre elles au fil du temps (elle est aussi ecrite dans le
+	rapport JSON). Le casque ne peut pas etre mesure de cette facon (le
+	micro n'entend pas ce qui sort dans les ecouteurs) : validation a
+	l'oreille uniquement pour cette partie-la.
 ---------------------------------------------------------------------------*/
 #include <nds.h>
 #include <maxmod9.h>
 #include <fat.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <math.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -92,7 +105,7 @@ static const char *nomLangue(unsigned langue) {
 
 static void etapeInfosConsole(InfosConsole *infos) {
 	iprintf("\x1b[2J");
-	iprintf("== Etape 1/3 : Infos console ==\n\n");
+	iprintf("== Etape 1/4 : Infos console ==\n\n");
 
 	if (isDSiMode()) {
 		strcpy(infos->modele, "Nintendo DSi");
@@ -163,7 +176,7 @@ static void etapeBoutons(ResultatBoutons *resultat, bool teste[NB_BOUTONS]) {
 		int held = keysHeld();
 
 		iprintf("\x1b[2J");
-		iprintf("== Etape 2/3 : Boutons ==\n\n");
+		iprintf("== Etape 2/4 : Boutons ==\n\n");
 		iprintf("Appuie sur chaque bouton\nrestant :\n\n");
 
 		int restants = 0;
@@ -204,7 +217,7 @@ static void etapeBoutons(ResultatBoutons *resultat, bool teste[NB_BOUTONS]) {
 	}
 
 	iprintf("\x1b[2J");
-	iprintf("== Etape 2/3 : Boutons ==\n\n");
+	iprintf("== Etape 2/4 : Boutons ==\n\n");
 	iprintf("%d/%d boutons testes OK\n", resultat->testes, resultat->total);
 	if (resultat->ignores > 0) {
 		iprintf("%d ignores manuellement\n", resultat->ignores);
@@ -235,7 +248,7 @@ static void etapeTactile(ResultatTactile *resultat) {
 		int held = keysHeld();
 
 		iprintf("\x1b[2J");
-		iprintf("== Etape 3/3 : Tactile ==\n\n");
+		iprintf("== Etape 3/4 : Tactile ==\n\n");
 		iprintf("Touche l'ecran une fois\n\n");
 
 		if (held & KEY_TOUCH) {
@@ -254,12 +267,194 @@ static void etapeTactile(ResultatTactile *resultat) {
 }
 
 /* --------------------------------------------------------------------- */
+/* Etape 4 : audio (haut-parleurs bouclees sur le micro + casque)         */
+/* --------------------------------------------------------------------- */
+
+#define TON_FREQ_HZ      1000
+#define TON_SAMPLE_RATE  16000
+#define TON_DUREE_S      2
+#define TON_NB_ECH       (TON_SAMPLE_RATE * TON_DUREE_S)
+#define TON_PI           3.14159265358979323846f
+
+#define MIC_SAMPLE_RATE     8000
+#define MIC_TAMPON_OCTETS   (MIC_SAMPLE_RATE * 2 / 30)  /* double-tampon ARM7, ~2 trames */
+#define ANALYSE_NB_ECH      1024                        /* ~128 ms a 8000 Hz */
+
+typedef struct {
+	bool testeHautParleurs;
+	bool hautParleursOk;
+	int niveauCretePercu;     /* proxy relatif, pas une mesure calibree */
+	int frequenceMesureeHz;
+	bool casqueTeste;
+	bool casqueOk;
+} ResultatAudio;
+
+static u16 tamponAnalyse[ANALYSE_NB_ECH];
+static volatile u32 indexAnalyse = 0;
+static volatile bool tamponAnalysePret = false;
+
+static void gestionnaireMicro(void *donnees, int longueur) {
+	DC_InvalidateRange(donnees, longueur);
+	u16 *src = (u16 *)donnees;
+	int nbEch = longueur / (int)sizeof(u16);
+	for (int i = 0; i < nbEch && indexAnalyse < ANALYSE_NB_ECH; i++) {
+		tamponAnalyse[indexAnalyse++] = src[i];
+	}
+	if (indexAnalyse >= ANALYSE_NB_ECH) {
+		tamponAnalysePret = true;
+	}
+}
+
+/* Analyse le dernier bloc capte : niveau (RMS autour de la moyenne) et
+   frequence estimee par comptage de passages autour de la moyenne. */
+static void analyserBloc(int *niveau, int *frequenceHz) {
+	long somme = 0;
+	for (u32 i = 0; i < ANALYSE_NB_ECH; i++) {
+		somme += tamponAnalyse[i];
+	}
+	int moyenne = (int)(somme / ANALYSE_NB_ECH);
+
+	long sommeCarres = 0;
+	int passages = 0;
+	bool precedentPositif = (tamponAnalyse[0] >= moyenne);
+	for (u32 i = 0; i < ANALYSE_NB_ECH; i++) {
+		int ecart = (int)tamponAnalyse[i] - moyenne;
+		sommeCarres += (long)ecart * ecart;
+		bool positif = (tamponAnalyse[i] >= moyenne);
+		if (positif != precedentPositif) {
+			passages++;
+			precedentPositif = positif;
+		}
+	}
+
+	*niveau = (int)sqrtf((float)sommeCarres / ANALYSE_NB_ECH);
+
+	float dureeFenetre = (float)ANALYSE_NB_ECH / MIC_SAMPLE_RATE;
+	*frequenceHz = (int)((passages / 2.0f) / dureeFenetre);
+}
+
+static void etapeAudio(ResultatAudio *resultat) {
+	resultat->testeHautParleurs = false;
+	resultat->hautParleursOk = false;
+	resultat->niveauCretePercu = 0;
+	resultat->frequenceMesureeHz = 0;
+	resultat->casqueTeste = false;
+	resultat->casqueOk = false;
+
+	mmStop();
+
+	s16 *tonBuffer = (s16 *)malloc(TON_NB_ECH * sizeof(s16));
+	u16 *tamponMic = (u16 *)malloc(MIC_TAMPON_OCTETS);
+
+	if (!tonBuffer || !tamponMic) {
+		iprintf("\x1b[2J");
+		iprintf("== Etape 4/4 : Audio ==\n\n");
+		iprintf("Memoire insuffisante,\ntest audio saute.\n");
+		attendreValidation("Continuer");
+		if (tonBuffer) free(tonBuffer);
+		if (tamponMic) free(tamponMic);
+		return;
+	}
+
+	for (int i = 0; i < TON_NB_ECH; i++) {
+		float phase = 2.0f * TON_PI * TON_FREQ_HZ * i / TON_SAMPLE_RATE;
+		tonBuffer[i] = (s16)(sinf(phase) * 30000.0f);
+	}
+
+	soundEnable();
+	int canalTon = soundPlaySample(tonBuffer, SoundFormat_16Bit,
+		TON_NB_ECH * sizeof(s16), TON_SAMPLE_RATE, 127, 64, true, 0);
+
+	/* --- Haut-parleurs : mesure en direct via bouclage micro --- */
+	indexAnalyse = 0;
+	tamponAnalysePret = false;
+	soundMicRecord(tamponMic, MIC_TAMPON_OCTETS, MicFormat_12Bit, MIC_SAMPLE_RATE, gestionnaireMicro);
+
+	int dernierNiveau = 0;
+	int dernierFreq = 0;
+	int niveauCrete = 0;
+
+	while (pmMainLoop()) {
+		swiWaitForVBlank();
+		scanKeys();
+
+		if (tamponAnalysePret) {
+			analyserBloc(&dernierNiveau, &dernierFreq);
+			if (dernierNiveau > niveauCrete) {
+				niveauCrete = dernierNiveau;
+			}
+			indexAnalyse = 0;
+			tamponAnalysePret = false;
+		}
+
+		iprintf("\x1b[2J");
+		iprintf("== Etape 4/4 : Audio ==\n\n");
+		iprintf("Son de test %dHz emis\na fond par les\nhaut-parleurs.\n\n", TON_FREQ_HZ);
+		iprintf("Capte par le micro :\n");
+		int barres = dernierNiveau / 150;
+		if (barres > 20) barres = 20;
+		for (int b = 0; b < barres; b++) {
+			iprintf("#");
+		}
+		iprintf(" (%d)\n", dernierNiveau);
+		iprintf("Frequence : %d Hz\n\n", dernierFreq);
+		iprintf("(A) haut-parleurs OK\n(B) probleme\n");
+
+		int appui = keysDown();
+		if (appui & KEY_A) {
+			resultat->hautParleursOk = true;
+			break;
+		}
+		if (appui & KEY_B) {
+			resultat->hautParleursOk = false;
+			break;
+		}
+	}
+	soundMicOff();
+	resultat->testeHautParleurs = true;
+	resultat->niveauCretePercu = niveauCrete;
+	resultat->frequenceMesureeHz = dernierFreq;
+
+	/* --- Casque : pas mesurable par le micro, validation a l'oreille --- */
+	iprintf("\x1b[2J");
+	iprintf("== Etape 4/4 : Audio ==\n\n");
+	iprintf("Branche un casque puis\necoute le son de test.\n\n");
+	iprintf("(A) casque OK\n(B) probleme\n(X) pas teste\n");
+
+	while (pmMainLoop()) {
+		swiWaitForVBlank();
+		scanKeys();
+		int appui = keysDown();
+		if (appui & KEY_A) {
+			resultat->casqueTeste = true;
+			resultat->casqueOk = true;
+			break;
+		}
+		if (appui & KEY_B) {
+			resultat->casqueTeste = true;
+			resultat->casqueOk = false;
+			break;
+		}
+		if (appui & KEY_X) {
+			resultat->casqueTeste = false;
+			break;
+		}
+	}
+
+	soundKill(canalTon);
+	free(tonBuffer);
+	free(tamponMic);
+
+	mmStart(MOD_XENON, MM_PLAY_LOOP);
+}
+
+/* --------------------------------------------------------------------- */
 /* Rapport JSON sur la carte SD                                           */
 /* --------------------------------------------------------------------- */
 
 static void ecrireRapport(int ticket, const InfosConsole *infos,
 	const ResultatBoutons *boutons, const bool testeBoutons[NB_BOUTONS],
-	const ResultatTactile *tactile) {
+	const ResultatTactile *tactile, const ResultatAudio *audio) {
 
 	if (!fatInitDefault()) {
 		iprintf("\nCarte SD non accessible,\nrapport non enregistre.\n");
@@ -322,6 +517,19 @@ static void ecrireRapport(int ticket, const InfosConsole *infos,
 	fprintf(f, "    \"teste\": %s,\n", tactile->teste ? "true" : "false");
 	fprintf(f, "    \"x\": %d,\n", tactile->dernierX);
 	fprintf(f, "    \"y\": %d\n", tactile->dernierY);
+	fprintf(f, "  },\n");
+	fprintf(f, "  \"audio\": {\n");
+	fprintf(f, "    \"haut_parleurs\": {\n");
+	fprintf(f, "      \"teste\": %s,\n", audio->testeHautParleurs ? "true" : "false");
+	fprintf(f, "      \"resultat\": \"%s\",\n", audio->hautParleursOk ? "ok" : "probleme");
+	fprintf(f, "      \"niveau_capte_pic\": %d,\n", audio->niveauCretePercu);
+	fprintf(f, "      \"note_niveau\": \"valeur relative non calibree, comparer entre tickets\",\n");
+	fprintf(f, "      \"frequence_mesuree_hz\": %d\n", audio->frequenceMesureeHz);
+	fprintf(f, "    },\n");
+	fprintf(f, "    \"casque\": {\n");
+	fprintf(f, "      \"teste\": %s,\n", audio->casqueTeste ? "true" : "false");
+	fprintf(f, "      \"resultat\": \"%s\"\n", !audio->casqueTeste ? "non_teste" : (audio->casqueOk ? "ok" : "probleme"));
+	fprintf(f, "    }\n");
 	fprintf(f, "  }\n");
 	fprintf(f, "}\n");
 
@@ -366,14 +574,22 @@ int main(void) {
 		ResultatTactile resultatTactile;
 		etapeTactile(&resultatTactile);
 
+		ResultatAudio resultatAudio;
+		etapeAudio(&resultatAudio);
+
 		iprintf("\x1b[2J");
 		iprintf("== Resume (ticket %04d) ==\n\n", ticket);
 		iprintf("Modele    : %s\n", infos.modele);
 		iprintf("Batterie  : %s\n", infos.batterie);
 		iprintf("Boutons   : %d/%d\n", resultatBoutons.testes, resultatBoutons.total);
 		iprintf("Tactile   : %s\n", resultatTactile.teste ? "OK" : "non teste");
+		iprintf("HP        : %s (%d Hz)\n",
+			resultatAudio.hautParleursOk ? "OK" : "probleme",
+			resultatAudio.frequenceMesureeHz);
+		iprintf("Casque    : %s\n",
+			!resultatAudio.casqueTeste ? "non teste" : (resultatAudio.casqueOk ? "OK" : "probleme"));
 
-		ecrireRapport(ticket, &infos, &resultatBoutons, testeBoutons, &resultatTactile);
+		ecrireRapport(ticket, &infos, &resultatBoutons, testeBoutons, &resultatTactile, &resultatAudio);
 
 		iprintf("\n(A) console suivante\n");
 	}
