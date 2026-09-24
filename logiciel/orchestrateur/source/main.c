@@ -13,12 +13,27 @@
 	materiel : aucune API ne l'expose de facon fiable au logiciel), ce qui
 	permet quand meme de tracer chaque passage de facon unique et automatique.
 
-	Le moteur de lecture boutons/croix/tactile de l'etape 2 et 3 est adapte
-	du fork "Input Test DS" (cphx, domaine public) present dans
-	../boutons-tactile/ : memes principes de lecture (scanKeys/touchRead),
-	mais restructure en liste a cocher avec sortie definie, puisqu'un
-	orchestrateur automatique a besoin d'un etat "termine" - contrairement
-	a la demo libre d'origine (voir ../boutons-tactile/PROVENANCE.md).
+	Le moteur de lecture boutons de l'etape 2 est adapte du fork "Input
+	Test DS" (cphx, domaine public) present dans ../boutons-tactile/ :
+	memes principes de lecture (scanKeys), mais restructure en liste a
+	cocher avec sortie definie, puisqu'un orchestrateur automatique a
+	besoin d'un etat "termine" - contrairement a la demo libre d'origine
+	(voir ../boutons-tactile/PROVENANCE.md).
+
+	L'etape 3 (tactile) est un test de couverture par peinture, ecrit
+	specifiquement pour Pinoudiag (plus rien a voir avec le fork) : le
+	stylet peint le pixel exact sous la pointe (largeur fixe 1px, pas de
+	pinceau epais qui fausserait la couverture) sur une grille de
+	TACTILE_COLONNES x TACTILE_LIGNES zones. Une bande reservee en haut du
+	canvas (flèche + palette) permet de changer la couleur sans toucher a
+	la largeur. Un saut de position suspect entre deux echantillons
+	consecutifs (incoherent avec un geste continu) marque la zone comme
+	"glitch" plutot que simplement "ok". L'ecran tactile (toujours
+	physiquement en bas) est obtenu en basculant le moteur principal
+	bitmap dessus via lcdMainOnBottom() (meme technique que l'etape 5),
+	pendant que la console texte (instructions + couverture en direct)
+	reste lisible sur l'ecran du haut. Fin de test libre (A a tout moment)
+	: les zones jamais peintes restent "non_teste", jamais "probleme".
 
 	L'etape 4 (audio) joue un son de test connu et l'ecoute en meme temps
 	via le micro (bouclage acoustique haut-parleurs -> micro), pour
@@ -250,23 +265,91 @@ static void etapeBoutons(ResultatBoutons *resultat, bool teste[NB_BOUTONS]) {
 }
 
 /* --------------------------------------------------------------------- */
-/* Etape 3 : ecran tactile                                                */
+/* Etape 3 : ecran tactile - peinture 1px + couverture par zone           */
+/*                                                                         */
+/* Le stylet peint le pixel exact sous la pointe (largeur fixe 1px, pas   */
+/* de pinceau epais qui fausserait la couverture). L'ecran tactile (bas)  */
+/* est bascule sur le moteur principal bitmap via lcdMainOnBottom() -     */
+/* meme technique que l'etape 5 - pendant que les instructions/la         */
+/* couverture en direct restent lisibles sur l'ecran du haut (console).   */
+/* Une bande reservee en haut du canvas (flèche + palette) permet de      */
+/* changer la couleur de peinture sans toucher a la largeur.              */
 /* --------------------------------------------------------------------- */
 
+#define TACTILE_COLONNES     10
+#define TACTILE_LIGNES       8
+#define TACTILE_NB_ZONES     (TACTILE_COLONNES * TACTILE_LIGNES)
+#define TACTILE_UI_HAUTEUR   20   /* bande du haut du canvas : flèche + palette */
+#define TACTILE_SAUT_SUSPECT 40   /* px entre 2 echantillons consecutifs -> glitch */
+
+#define TACTILE_NB_COULEURS 6
+
 typedef struct {
-	bool teste;
-	bool ignore;
-	int dernierX;
-	int dernierY;
+	bool zoneCouverte[TACTILE_NB_ZONES];
+	bool zoneGlitch[TACTILE_NB_ZONES];
+	int zonesCouvertes;
 } ResultatTactile;
+
+static const u16 TACTILE_PALETTE[TACTILE_NB_COULEURS] = {
+	(u16)(RGB15(31, 0, 0) | BIT(15)),   /* rouge */
+	(u16)(RGB15(0, 31, 0) | BIT(15)),   /* vert */
+	(u16)(RGB15(0, 0, 31) | BIT(15)),   /* bleu */
+	(u16)(RGB15(31, 31, 0) | BIT(15)),  /* jaune */
+	(u16)(RGB15(31, 31, 31) | BIT(15)), /* blanc */
+	(u16)(RGB15(0, 31, 31) | BIT(15)),  /* cyan */
+};
+
+static void tactileDessinerBande(bool paletteOuverte, int couleurActuelle) {
+	/* Bouton fleche : carre 20x20 en haut a gauche */
+	for (int y = 0; y < TACTILE_UI_HAUTEUR; y++) {
+		for (int x = 0; x < 20; x++) {
+			BG_GFX[y * 256 + x] = (u16)(RGB15(15, 15, 15) | BIT(15));
+		}
+	}
+	if (!paletteOuverte) {
+		return;
+	}
+	/* Palette : une pastille par couleur, juste a droite de la fleche */
+	for (int i = 0; i < TACTILE_NB_COULEURS; i++) {
+		int xDebut = 24 + i * 22;
+		for (int y = 0; y < TACTILE_UI_HAUTEUR; y++) {
+			for (int x = xDebut; x < xDebut + 20 && x < 256; x++) {
+				u16 couleur = TACTILE_PALETTE[i];
+				/* Pastille active entouree d'une bordure sombre */
+				bool bord = (y == 0 || y == TACTILE_UI_HAUTEUR - 1 ||
+					x == xDebut || x == xDebut + 19);
+				if (i == couleurActuelle && bord) {
+					couleur = (u16)(RGB15(0, 0, 0) | BIT(15));
+				}
+				BG_GFX[y * 256 + x] = couleur;
+			}
+		}
+	}
+}
 
 static void etapeTactile(ResultatTactile *resultat) {
 	touchPosition touch;
-	resultat->teste = false;
-	resultat->ignore = false;
-	resultat->dernierX = -1;
-	resultat->dernierY = -1;
-	int selectMaintenuFrames = 0;
+	for (int i = 0; i < TACTILE_NB_ZONES; i++) {
+		resultat->zoneCouverte[i] = false;
+		resultat->zoneGlitch[i] = false;
+	}
+	resultat->zonesCouvertes = 0;
+
+	lcdMainOnBottom();
+
+	/* Fond du canvas en gris fonce pour bien voir les traits peints */
+	u16 fond = (u16)(RGB15(6, 6, 8) | BIT(15));
+	for (int i = 0; i < 256 * 192; i++) {
+		BG_GFX[i] = fond;
+	}
+
+	bool paletteOuverte = false;
+	int couleurActuelle = 4; /* blanc par defaut */
+	tactileDessinerBande(paletteOuverte, couleurActuelle);
+
+	bool toucheAvant = false;
+	int xAvant = 0, yAvant = 0;
+	bool boutonFlecheAppuyeAvant = false;
 
 	while (pmMainLoop()) {
 		swiWaitForVBlank();
@@ -276,33 +359,91 @@ static void etapeTactile(ResultatTactile *resultat) {
 
 		iprintf("\x1b[2J");
 		iprintf("== Etape 3/6 : Tactile ==\n\n");
-		iprintf("Touche l'ecran une fois\n\n");
-		iprintf("(maintiens SELECT ~1.5s\npour ignorer ce test)\n");
+		iprintf("Balaie tout l'ecran\ntactile avec le\nstylet.\n\n");
+		iprintf("Fleche = choisir la\ncouleur (largeur\ntoujours 1px).\n\n");
+		iprintf("Couverture : %d%%\n", (resultat->zonesCouvertes * 100) / TACTILE_NB_ZONES);
+		iprintf("\n(A) Terminer\n");
 
 		if (held & KEY_TOUCH) {
-			resultat->teste = true;
-			resultat->dernierX = touch.px;
-			resultat->dernierY = touch.py;
-		}
+			int x = touch.px;
+			int y = touch.py;
 
-		if (held & KEY_SELECT) {
-			selectMaintenuFrames++;
-			if (selectMaintenuFrames > 90) {
-				resultat->ignore = true;
-				break;
+			bool dansBoutonFleche = (y < TACTILE_UI_HAUTEUR && x < 20);
+			bool dansPalette = (y < TACTILE_UI_HAUTEUR && x >= 24 &&
+				x < 24 + TACTILE_NB_COULEURS * 22);
+
+			if (dansBoutonFleche) {
+				if (!boutonFlecheAppuyeAvant) {
+					paletteOuverte = !paletteOuverte;
+					tactileDessinerBande(paletteOuverte, couleurActuelle);
+				}
+				boutonFlecheAppuyeAvant = true;
+				toucheAvant = false; /* pas de suivi de trait dans la bande */
+			} else if (dansPalette && paletteOuverte) {
+				int indexCouleur = (x - 24) / 22;
+				if (indexCouleur >= 0 && indexCouleur < TACTILE_NB_COULEURS) {
+					couleurActuelle = indexCouleur;
+					tactileDessinerBande(paletteOuverte, couleurActuelle);
+				}
+				boutonFlecheAppuyeAvant = false;
+				toucheAvant = false;
+			} else if (y >= TACTILE_UI_HAUTEUR) {
+				boutonFlecheAppuyeAvant = false;
+
+				/* Detection de saut suspect entre 2 echantillons consecutifs */
+				int zoneX = (x * TACTILE_COLONNES) / 256;
+				int zoneY = ((y - TACTILE_UI_HAUTEUR) * TACTILE_LIGNES) /
+					(192 - TACTILE_UI_HAUTEUR);
+				if (zoneX >= TACTILE_COLONNES) zoneX = TACTILE_COLONNES - 1;
+				if (zoneY >= TACTILE_LIGNES) zoneY = TACTILE_LIGNES - 1;
+				int zone = zoneY * TACTILE_COLONNES + zoneX;
+
+				if (toucheAvant) {
+					int dx = x - xAvant;
+					int dy = y - yAvant;
+					int distance = (dx < 0 ? -dx : dx) + (dy < 0 ? -dy : dy);
+					if (distance > TACTILE_SAUT_SUSPECT) {
+						resultat->zoneGlitch[zone] = true;
+					}
+				}
+
+				if (!resultat->zoneCouverte[zone]) {
+					resultat->zoneCouverte[zone] = true;
+					resultat->zonesCouvertes++;
+				}
+
+				u16 couleurTrait = resultat->zoneGlitch[zone] ?
+					(u16)(RGB15(31, 0, 0) | BIT(15)) : TACTILE_PALETTE[couleurActuelle];
+				BG_GFX[y * 256 + x] = couleurTrait;
+
+				toucheAvant = true;
+				xAvant = x;
+				yAvant = y;
 			}
 		} else {
-			selectMaintenuFrames = 0;
+			toucheAvant = false;
+			boutonFlecheAppuyeAvant = false;
 		}
 
-		if (resultat->teste) {
-			iprintf("Touche detectee\nX=%d Y=%d\n", resultat->dernierX, resultat->dernierY);
+		if (keysDown() & KEY_A) {
 			break;
 		}
 	}
 
-	attendreValidation(resultat->teste ? "Tactile OK" :
-		(resultat->ignore ? "Tactile ignore" : "Tactile non teste"));
+	lcdMainOnTop();
+	decompress(logoBitmap, BG_GFX, LZ77Vram);
+
+	iprintf("\x1b[2J");
+	iprintf("== Etape 3/6 : Tactile ==\n\n");
+	iprintf("Couverture finale : %d%%\n", (resultat->zonesCouvertes * 100) / TACTILE_NB_ZONES);
+	int nbGlitch = 0;
+	for (int i = 0; i < TACTILE_NB_ZONES; i++) {
+		if (resultat->zoneGlitch[i]) nbGlitch++;
+	}
+	if (nbGlitch > 0) {
+		iprintf("%d zone(s) avec saut\nsuspect (glitch)\n", nbGlitch);
+	}
+	attendreValidation("Continuer");
 }
 
 /* --------------------------------------------------------------------- */
@@ -723,9 +864,17 @@ static void ecrireRapport(int ticket, const InfosConsole *infos,
 	fprintf(f, "    }\n");
 	fprintf(f, "  },\n");
 	fprintf(f, "  \"tactile\": {\n");
-	fprintf(f, "    \"resultat\": \"%s\",\n", tactile->teste ? "ok" : "non_teste");
-	fprintf(f, "    \"x\": %d,\n", tactile->dernierX);
-	fprintf(f, "    \"y\": %d\n", tactile->dernierY);
+	fprintf(f, "    \"couverture_pct\": %d,\n",
+		(tactile->zonesCouvertes * 100) / TACTILE_NB_ZONES);
+	fprintf(f, "    \"grille\": \"%dx%d\",\n", TACTILE_COLONNES, TACTILE_LIGNES);
+	fprintf(f, "    \"detail\": {\n");
+	for (int i = 0; i < TACTILE_NB_ZONES; i++) {
+		const char *statut = tactile->zoneGlitch[i] ? "glitch" :
+			(tactile->zoneCouverte[i] ? "ok" : "non_teste");
+		fprintf(f, "      \"zone_%02d\": \"%s\"%s\n", i, statut,
+			(i < TACTILE_NB_ZONES - 1) ? "," : "");
+	}
+	fprintf(f, "    }\n");
 	fprintf(f, "  },\n");
 	fprintf(f, "  \"audio\": {\n");
 	fprintf(f, "    \"haut_parleurs\": {\n");
@@ -818,7 +967,8 @@ int main(void) {
 		iprintf("Modele    : %s\n", infos.modele);
 		iprintf("Batterie  : %s\n", infos.batterie);
 		iprintf("Boutons   : %d/%d\n", resultatBoutons.testes, resultatBoutons.total);
-		iprintf("Tactile   : %s\n", resultatTactile.teste ? "OK" : "non teste");
+		iprintf("Tactile   : %d%% couvert\n",
+			(resultatTactile.zonesCouvertes * 100) / TACTILE_NB_ZONES);
 		iprintf("HP        : %s (%d Hz)\n",
 			resultatAudio.hautParleursOk ? "OK" : "probleme",
 			resultatAudio.frequenceMesureeHz);

@@ -17,7 +17,9 @@ ce dossier est la version "à lancer et laisser tourner".
    chaque bouton dès qu'il est pressé, avance seule quand tout est testé.
    Maintenir SELECT ~1,5s ignore les boutons restants (bouton cassé/absent,
    pour ne pas bloquer le diagnostic).
-3. **Écran tactile** (semi-auto) : avance dès qu'une touche est détectée.
+3. **Écran tactile** (manuel, couverture) : balaie tout l'écran au stylet
+   pour peindre chaque zone, termine quand tu veux (A) — voir "Test tactile
+   par couverture" ci-dessous.
 4. **Audio** (semi-auto, avec mesure en direct) : joue un son de test à
    1000 Hz à fond sur les haut-parleurs et l'écoute en même temps via le
    micro (bouclage acoustique), avec un niveau et une fréquence affichés en
@@ -37,13 +39,42 @@ ce dossier est la version "à lancer et laisser tourner".
 ## Principe "ignoré ≠ défaut"
 
 Chaque étape qui peut être ignorée (accessoire absent, maintien de SELECT,
-délai dépassé...) l'enregistre comme `"non_teste"` dans le rapport JSON, et
-**jamais** comme `"probleme"`. Concerné : boutons ignorés en bloc via
-SELECT, tactile ignoré, casque non branché (X), capteur de fermeture non
-testé. L'idée : ne jamais faire dire au rapport qu'un composant est
-défaillant alors qu'il n'a en réalité pas pu être observé — sinon on risque
-un diagnostic erroné (ex. déclarer le casque en panne juste parce qu'aucun
-casque n'était disponible au moment du test).
+délai dépassé, zone jamais balayée...) l'enregistre comme `"non_teste"`
+dans le rapport JSON, et **jamais** comme `"probleme"`. Concerné : boutons
+ignorés en bloc via SELECT, zones tactiles jamais peintes, casque non
+branché (X), capteur de fermeture non testé. L'idée : ne jamais faire dire
+au rapport qu'un composant est défaillant alors qu'il n'a en réalité pas pu
+être observé — sinon on risque un diagnostic erroné (ex. déclarer le
+casque en panne juste parce qu'aucun casque n'était disponible au moment
+du test).
+
+## Test tactile par couverture
+
+Plutôt qu'un simple "touche une fois pour valider", ce test découpe
+l'écran tactile en une grille de **10 × 8 = 80 zones**. Le stylet peint le
+pixel exact sous la pointe (largeur toujours 1px — pas de gros pinceau qui
+colorierait plusieurs zones sans les avoir vraiment touchées) : balaie tout
+l'écran pour "peindre" chaque zone, une barre de progression affiche la
+couverture en direct sur l'écran du haut. Termine quand tu veux avec **A**
+— les zones jamais peintes restent `"non_teste"` dans le rapport, jamais
+`"probleme"` (cohérent avec le principe ci-dessus).
+
+Une petite flèche en haut à gauche du canvas ouvre/ferme une palette de 6
+couleurs pour changer la couleur de peinture (confort visuel uniquement —
+la largeur reste fixée à 1px quoi qu'il arrive, elle n'est pas réglable,
+justement pour ne pas fausser la mesure de couverture).
+
+**Détection de glitch** : en plus de "zone touchée ou pas", le test
+surveille les sauts de position anormaux entre deux échantillons tactiles
+consécutifs (incohérents avec un geste continu au stylet). Une zone où un
+tel saut est détecté passe en `"glitch"` (affichée en rouge sur le canvas)
+plutôt que simplement `"ok"` — signe possible d'un bruit/parasite du
+digitizer à cet endroit précis plutôt que d'une zone totalement morte.
+
+Technique : comme pour l'étape écran, `lcdMainOnBottom()` bascule le moteur
+d'affichage bitmap (normalement sur l'écran du haut) vers l'écran du bas —
+le seul physiquement tactile — pendant que la console texte (instructions
++ couverture en direct) passe automatiquement sur l'écran du haut.
 
 ## Visualiseur audio
 
@@ -141,7 +172,11 @@ Exemple de contenu :
   "langue": "Francais",
   "pseudo": "",
   "boutons": { "testes": 12, "total": 12, "detail": { "A": "ok", "...": "ok" } },
-  "tactile": { "resultat": "ok", "x": 128, "y": 96 },
+  "tactile": {
+    "couverture_pct": 97,
+    "grille": "10x8",
+    "detail": { "zone_00": "ok", "zone_01": "ok", "...": "ok", "zone_37": "glitch", "zone_42": "non_teste" }
+  },
   "audio": {
     "haut_parleurs": {
       "teste": true,
@@ -166,22 +201,24 @@ Exemple de contenu :
 }
 ```
 
-Un bouton, le tactile ou la charnière ignorés apparaissent avec
-`"resultat": "non_teste"` (boutons : `"non_teste"` dans `detail`) plutôt
-que `"probleme"` — voir "Principe *ignoré ≠ défaut*" ci-dessus.
+Un bouton, une zone tactile jamais peinte ou la charnière ignorés
+apparaissent avec `"non_teste"` plutôt que `"probleme"` — voir "Principe
+*ignoré ≠ défaut*" ci-dessus.
 
 Si la carte SD n'est pas accessible (pas de pilote DLDI reconnu), le
 programme continue quand même et affiche simplement que le rapport n'a pas
 pu être enregistré — ça ne bloque jamais le diagnostic en cours.
 
-## Origine du moteur boutons/tactile
+## Origine du moteur boutons
 
-La lecture des touches et du tactile (étapes 2 et 3) est adaptée du fork
-**Input Test DS** (cphx, domaine public) présent dans `../boutons-tactile/`.
-Contrairement au fork gardé tel quel, la logique a été restructurée en liste
-à cocher avec une sortie définie (nécessaire pour un enchaînement
-automatique) au lieu d'une démo libre sans fin — voir
-`../boutons-tactile/PROVENANCE.md` pour la source d'origine intacte.
+La lecture des boutons (étape 2) est adaptée du fork **Input Test DS**
+(cphx, domaine public) présent dans `../boutons-tactile/`. Contrairement au
+fork gardé tel quel, la logique a été restructurée en liste à cocher avec
+une sortie définie (nécessaire pour un enchaînement automatique) au lieu
+d'une démo libre sans fin — voir `../boutons-tactile/PROVENANCE.md` pour la
+source d'origine intacte. Le test tactile (étape 3), lui, est une
+réécriture complète propre à Pinoudiag (couverture par grille peinte),
+sans lien avec ce fork.
 
 ## Origine du moteur audio
 
@@ -210,5 +247,6 @@ Génère `pinouNDSdiag-orchestrateur.nds`.
 - Collecter des `niveau_capte_pic` de plusieurs consoles saines pour définir
   une plage "normale" indicative (voir "Visualiseur audio" ci-dessus)
 - Étendre le test écran : nuances de gris (pixels bloqués parfois visibles
-  uniquement à mi-luminosité), ou permettre de toucher l'endroit exact du
-  défaut sur l'écran du bas (tactile) pour le noter dans le rapport
+  uniquement à mi-luminosité)
+- Mode endurance batterie (charge/décharge chronométrée) — séparé de
+  l'orchestrateur, discuté mais pas encore implémenté (dure des heures)
